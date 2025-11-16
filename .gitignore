@@ -1,0 +1,85 @@
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.pkl
+*.db
+*.sqlite3
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+*.log
+
+# Flask instance folder
+instance/
+
+# Flask / local configs
+.env
+*.env
+config.json
+
+# Virtualenv
+venv/
+ENV/
+env/
+.venv/
+
+# Editor stuff
+.vscode/
+.idea/
+*.swp
+
+# Byte-code / cache
+*.egg-info/
+.eggs/
+
+# Dist / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+var/
+*.egg
+
+# MacOS basura
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# pyenv / pipenv / poetry
+.python-version
+Pipfile.lock
+poetry.lock
+
+# Docker stuff
+docker-volume/
+docker-data/
+*.pid
+
+# Logs
+logs/
+*.log
+
+# Gunicorn sockets
+*.sock
+
+# MyPy / lint
+.mypy_cache/
+.pytype/
+ruff_cache/
+
+# Misc
+*.tmp
