@@ -96,7 +96,9 @@ def dias_con_llamadas():
         .group_by(func.date(CallReminder.fecha_hora))
         .order_by(func.date(CallReminder.fecha_hora).asc())
     )
-
+    q = q.filter(CallReminder.tenant_id == tenant_id)
+    if estado:
+        q = q.filter(CallReminder.estado == estado)
     if from_:
         d = datetime.fromisoformat(from_).date()
         q = q.filter(CallReminder.fecha_hora >= datetime.combine(d, datetime.min.time()))
