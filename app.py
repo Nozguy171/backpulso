@@ -1,3 +1,4 @@
+import os
 import time
 from sqlalchemy.exc import OperationalError
 
@@ -6,9 +7,7 @@ from app.extensions import db
 
 app = create_app()
 
-
-def init_db_with_retry(max_retries: int = 10, delay_seconds: int = 2):
-    """Intenta hacer db.create_all() con reintentos mientras arranca Postgres."""
+def init_db_with_retry(max_retries: int = 20, delay_seconds: int = 2):
     attempt = 1
     while attempt <= max_retries:
         try:
@@ -22,10 +21,10 @@ def init_db_with_retry(max_retries: int = 10, delay_seconds: int = 2):
             time.sleep(delay_seconds)
             attempt += 1
 
-    print("[INIT-DB] No se pudo conectar a la DB después de varios intentos 💀")
+    raise RuntimeError("[INIT-DB] No se pudo conectar a la DB después de varios intentos 💀")
 
-
-if __name__ == "__main__":
+try:
     init_db_with_retry()
-
-    app.run(host="0.0.0.0", port=8000, debug=True)
+except Exception as e:
+    print(str(e))
+    # no matamos el proceso aquí; gunicorn podría reiniciar

@@ -5,28 +5,39 @@ services:
     image: postgres:16-alpine
     container_name: pulso-crm-db
     environment:
-      POSTGRES_DB: pulso_crm_db
-      POSTGRES_USER: pulso_user
-      POSTGRES_PASSWORD: pulso_pass
-    ports:
-      - "5445:5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pulso_crm_pgdata_v2:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   backend:
     build: .
     container_name: pulso-crm-backend
     environment:
-      DATABASE_URL: postgresql://pulso_user:pulso_pass@db:5432/pulso_crm_db
-      JWT_SECRET_KEY: super-secret-pulso
-      FLASK_DEBUG: "1"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      FLASK_DEBUG: ${FLASK_DEBUG}
+      JWT_DAYS: ${JWT_DAYS}
+      CORS_ORIGINS: ${CORS_ORIGINS}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "8085:8000"
-    # opcional: para autoreload en dev, puedes montar tu código
-    # volumes:
-    #   - .:/app
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    # si tu app escribe uploads/logs dentro del contenedor, quita read_only o monta volumen
 
 volumes:
   pulso_crm_pgdata_v2:
