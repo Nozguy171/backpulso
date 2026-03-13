@@ -10,6 +10,7 @@ from .routes.users import users_bp
 from .routes.appointments import appointments_bp
 from .routes.calls import calls_bp
 from .routes.invites import invites_bp
+from .routes.stats import stats_bp
 
 def create_app(config_class=Config):
     app = Flask(__name__)
@@ -29,6 +30,7 @@ def create_app(config_class=Config):
     app.register_blueprint(appointments_bp, url_prefix="/api/appointments")
     app.register_blueprint(calls_bp, url_prefix="/api/calls")
     app.register_blueprint(invites_bp, url_prefix="/api/invites")
+    app.register_blueprint(stats_bp, url_prefix="/api/stats")
     @app.get("/api/health")
     def health():
         return {"status": "ok"}

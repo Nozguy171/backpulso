@@ -15,17 +15,36 @@ def slugify_from_email(email: str) -> str:
 @auth_bp.post("/signup")
 def signup():
     data = request.get_json() or {}
-
     email = (data.get("email") or "").strip().lower()
+    nombre_completo = (data.get("email") or "").strip()
+    username = (data.get("username") or "").strip().lower()
+    numero_telefonico = (data.get("numero_telefonico") or "").strip()
     password = data.get("password") or ""
     confirm_password = data.get("confirm_password") or ""
 
-    if not email or not password or not confirm_password:
-        return {"message": "Faltan campos"}, 400
+    if not nombre_completo:
+        return {"message": "El nombre completo es obligatorio"}, 400
+
+    if not username:
+        return {"message": "El username es obligatorio"}, 400
+
+    if not numero_telefonico:
+        return {"message": "El número telefónico es obligatorio"}, 400
+
+    if not numero_telefonico.isdigit() or len(numero_telefonico) != 10:
+        return {"message": "El número telefónico debe tener exactamente 10 dígitos"}, 400
+
+    if not password or not confirm_password:
+        return {"message": "Contraseña y confirmación obligatorias"}, 400
+
     if password != confirm_password:
         return {"message": "Las contraseñas no coinciden"}, 400
-    if User.query.filter_by(email=email).first():
-        return {"message": "Ya existe una cuenta con ese correo"}, 400
+
+    if User.query.filter_by(username=username).first():
+        return {"message": "Ese username ya está en uso"}, 409
+
+    if User.query.filter_by(numero_telefonico=numero_telefonico).first():
+        return {"message": "Ese número telefónico ya está en uso"}, 409
 
     tenant_name = email.split("@")[0]
     slug = slugify_from_email(email)
@@ -42,10 +61,21 @@ def signup():
         plan=plan,
         collaborator_limit=PLAN_LIMITS.get(plan, 1),
     )
-    user = User(email=email, tenant=tenant, role="leader")
+
+    db.session.add(tenant)
+    db.session.flush()
+
+    user = User(
+        tenant_id=tenant.id,
+        email=email,
+        username=username,
+        numero_telefonico=numero_telefonico,
+        role="leader",
+    )
+
     user.set_password(password)
 
-    db.session.add_all([tenant, user])
+    db.session.add(user)
     db.session.commit()
 
     access_token = create_access_token(
@@ -66,13 +96,16 @@ def signup():
 def login():
     data = request.get_json() or {}
 
-    email = (data.get("email") or "").strip().lower()
+    login = (data.get("login") or "").strip()
     password = data.get("password") or ""
 
-    if not email or not password:
-        return {"message": "Correo y contraseña obligatorios"}, 400
+    if not login or not password:
+        return {"message": "Usuario y contraseña son obligatorios"}, 400
 
-    user = User.query.filter_by(email=email).first()
+    user = User.query.filter(
+        (User.username == login.lower()) | (User.numero_telefonico == login)
+    ).first()
+
     if not user or not user.check_password(password):
         return {"message": "Credenciales inválidas"}, 401
 
@@ -99,11 +132,22 @@ def login():
 @auth_bp.post("/signup-collaborator")
 def signup_collaborator():
     data = request.get_json() or {}
-
+    username = (data.get("username") or "").strip().lower()
+    numero_telefonico = (data.get("numero_telefonico") or "").strip()
     token = (data.get("token") or "").strip()
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
     confirm_password = data.get("confirm_password") or ""
+
+    if not username:
+        return {"message": "El username es obligatorio"}, 400
+
+    if not numero_telefonico:
+        return {"message": "El número telefónico es obligatorio"}, 400
+
+    if not numero_telefonico.isdigit() or len(numero_telefonico) != 10:
+        return {"message": "El número telefónico debe tener exactamente 10 dígitos"}, 400
+
 
     if not token or not email or not password or not confirm_password:
         return {"message": "Faltan campos"}, 400
@@ -129,7 +173,13 @@ def signup_collaborator():
     if current_collabs >= tenant.collaborator_limit:
         return {"message": "Límite de colaboradores alcanzado"}, 409
 
-    user = User(email=email, tenant_id=tenant.id, role="collaborator")
+    user = User(
+        tenant_id=tenant.id,
+        email=email,
+        username=username,
+        numero_telefonico=numero_telefonico,
+        role="collaborator",
+    )
     user.set_password(password)
 
     inv.uses += 1

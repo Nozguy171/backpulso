@@ -26,6 +26,9 @@ class User(db.Model):
     tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=False)
 
     email = db.Column(db.String(255), unique=True, nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
+    numero_telefonico = db.Column(db.String(20), unique=True, nullable=False, index=True)
+
     password_hash = db.Column(db.String(255), nullable=False)
 
     role = db.Column(db.String(30), nullable=False, default="leader")
@@ -54,6 +57,10 @@ class Prospect(db.Model):
     nombre = db.Column(db.String(200), nullable=False)
     numero = db.Column(db.String(50), nullable=False)
     observaciones = db.Column(db.Text, nullable=True)
+    forma_obtencion_tipo = db.Column(db.String(50), nullable=False)
+    forma_obtencion = db.Column(db.String(255), nullable=False)
+    seguimiento_pausado = db.Column(db.Boolean, nullable=True, default=False)
+    seguimiento_pausado_at = db.Column(db.DateTime, nullable=True)
     assigned_to_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     rechazo_motivo = db.Column(db.Text, nullable=True)
     rechazo_at = db.Column(db.DateTime, nullable=True)
@@ -110,6 +117,12 @@ class Appointment(db.Model):
     estado = db.Column(db.String(50), default="programada", index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+
+    estado_detalle = db.Column(db.Text, nullable=True)     
+    resolved_at = db.Column(db.DateTime, nullable=True)   
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
     prospect = db.relationship("Prospect", lazy="joined")
     created_by_user = db.relationship("User", lazy="joined")
 
@@ -123,6 +136,11 @@ class CallReminder(db.Model):
 
     fecha_hora = db.Column(db.DateTime, nullable=False)
     observaciones = db.Column(db.Text, nullable=True)
+
+    estado_detalle = db.Column(db.Text, nullable=True)      
+    resolved_at = db.Column(db.DateTime, nullable=True)    
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
     estado = db.Column(db.String(50), default="pendiente", index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

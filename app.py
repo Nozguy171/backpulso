@@ -12,8 +12,8 @@ def init_db_with_retry(max_retries: int = 20, delay_seconds: int = 2):
     while attempt <= max_retries:
         try:
             print(f"[INIT-DB] Intento {attempt}/{max_retries} de crear tablas...")
-            with app.app_context():
-                db.create_all()
+            #with app.app_context():
+               # db.create_all()
             print("[INIT-DB] Tablas creadas correctamente ✅")
             return
         except OperationalError as e:

@@ -7,6 +7,7 @@ from ..extensions import db
 from ..models import Prospect, ProspectHistory, Appointment, CallReminder, User
 import calendar
 from sqlalchemy.orm import aliased
+from ..utils.visibility import get_visible_user_id
 
 prospects_bp = Blueprint("prospects", __name__)
 def _cancelar_todo_agendado_de_prospecto(
@@ -47,6 +48,19 @@ def _cancelar_todo_agendado_de_prospecto(
         obs = (a.observaciones or "").strip()
         extra = f"Cancelada automáticamente: {motivo}"
         a.observaciones = (obs + ("\n" if obs else "") + extra) if extra else obs
+
+def _fmt_dt(dt: datetime | None) -> str | None:
+    if not dt:
+        return None
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+def _set_prospect_estado(prospect: Prospect, nuevo_estado: str | None):
+    if not nuevo_estado:
+        return None, None
+
+    de_estado = prospect.estado
+    prospect.estado = nuevo_estado
+    return de_estado, nuevo_estado
 
 def _get_effective_user_id(claims, actor_user_id: int) -> int:
     role = claims.get("role")
@@ -152,9 +166,13 @@ def _prospect_to_dict(p: Prospect):
         "numero": p.numero,
         "observaciones": p.observaciones,
         "estado": p.estado,
-        "assigned_to_user_id": p.assigned_to_user_id,  # ✅
+        "assigned_to_user_id": p.assigned_to_user_id,
         "recomendado_por_id": p.recomendado_por_id,
         "recomendado_por_nombre": p.recomendado_por.nombre if p.recomendado_por else None,
+        "forma_obtencion_tipo": p.forma_obtencion_tipo,
+        "forma_obtencion": p.forma_obtencion,
+        "seguimiento_pausado": bool(getattr(p, "seguimiento_pausado", False)),
+        "seguimiento_pausado_at": p.seguimiento_pausado_at.isoformat() + "Z" if getattr(p, "seguimiento_pausado_at", None) else None,
         "created_at": p.created_at.isoformat(),
         "venta_monto_sin_iva": float(p.venta_monto_sin_iva) if p.venta_monto_sin_iva is not None else None,
         "venta_fecha": p.venta_fecha.isoformat() + "Z" if p.venta_fecha else None,
@@ -167,12 +185,12 @@ def _prospect_to_dict(p: Prospect):
 @prospects_bp.post("/")
 @jwt_required()
 def crear_prospecto():
-    actor_user_id = int(get_jwt_identity())  # ✅ define primero
+    actor_user_id = int(get_jwt_identity())
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
     role = claims.get("role")
 
-    effective_user_id = _get_effective_user_id(claims, actor_user_id)  # ✅ ya existe
+    effective_user_id = _get_effective_user_id(claims, actor_user_id)
 
     data = request.get_json() or {}
     nombre = (data.get("nombre") or "").strip()
@@ -181,10 +199,22 @@ def crear_prospecto():
     recomendado_por_id = data.get("recomendado_por_id")
     assigned_to_user_id = data.get("assigned_to_user_id")
 
+    forma_obtencion_tipo = (data.get("forma_obtencion_tipo") or "").strip()
+    forma_obtencion = (data.get("forma_obtencion") or "").strip()
+
     if not nombre or not numero:
         return {"message": "Nombre y número son obligatorios"}, 400
 
-    assigned_to_user_id = data.get("assigned_to_user_id")
+    if forma_obtencion_tipo not in {"encuesta", "cita_en_frio", "otro"}:
+        return {"message": "forma_obtencion_tipo inválido"}, 400
+
+    if forma_obtencion_tipo == "encuesta":
+        forma_obtencion = "Encuesta"
+    elif forma_obtencion_tipo == "cita_en_frio":
+        forma_obtencion = "Cita en frío"
+    elif forma_obtencion_tipo == "otro":
+        if not forma_obtencion:
+            return {"message": "Debes especificar la forma de obtención cuando eliges 'otro'"}, 400
 
     if role == "collaborator":
         assigned_to_user_id = effective_user_id
@@ -197,19 +227,18 @@ def crear_prospecto():
     except Exception:
         return {"message": "assigned_to_user_id inválido"}, 400
 
-    try:
-        assigned_to_user_id = int(assigned_to_user_id)
-    except Exception:
-        return {"message": "assigned_to_user_id inválido"}, 400
-
-    assigned_user = User.query.filter_by(id=assigned_to_user_id, tenant_id=tenant_id).first()
+    assigned_user = User.query.filter_by(
+        id=assigned_to_user_id,
+        tenant_id=tenant_id
+    ).first()
     if not assigned_user:
         return {"message": "assigned_to_user_id no pertenece a tu equipo"}, 400
 
     recomendado_prospect = None
     if recomendado_por_id:
         recomendado_prospect = Prospect.query.filter_by(
-            id=recomendado_por_id, tenant_id=tenant_id
+            id=recomendado_por_id,
+            tenant_id=tenant_id
         ).first()
         if not recomendado_prospect:
             return {"message": "El prospecto recomendado no existe"}, 400
@@ -217,15 +246,19 @@ def crear_prospecto():
     prospect = Prospect(
         tenant_id=tenant_id,
         created_by_user_id=effective_user_id,
-        assigned_to_user_id=assigned_to_user_id,  
+        assigned_to_user_id=assigned_to_user_id,
         nombre=nombre,
         numero=numero,
         observaciones=observaciones,
         recomendado_por=recomendado_prospect,
+        forma_obtencion_tipo=forma_obtencion_tipo,
+        forma_obtencion=forma_obtencion,
         estado="pendiente",
     )
     db.session.add(prospect)
     db.session.flush()
+
+    detalle_historial = observaciones or f"Forma de obtención: {forma_obtencion}"
 
     _log_history(
         tenant_id=tenant_id,
@@ -235,7 +268,7 @@ def crear_prospecto():
         accion="crear_prospecto",
         de_estado=None,
         a_estado="pendiente",
-        detalle=observaciones,
+        detalle=detalle_historial,
     )
 
     db.session.commit()
@@ -247,16 +280,15 @@ def crear_prospecto():
 def listar_prospectos():
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
-    role = claims.get("role")
-    user_id = int(get_jwt_identity())
+    visible_user_id = get_visible_user_id(claims, int(get_jwt_identity()))
 
     estado = request.args.get("estado")
     q = (request.args.get("q") or "").strip()
 
-    query = Prospect.query.filter_by(tenant_id=tenant_id)
-
-    if role == "collaborator":
-        query = query.filter(Prospect.assigned_to_user_id == user_id)
+    query = Prospect.query.filter_by(
+        tenant_id=tenant_id,
+        assigned_to_user_id=visible_user_id,
+    )
 
     if estado:
         query = query.filter_by(estado=estado)
@@ -275,6 +307,7 @@ def buscar_recomendadores():
     """Para autocompletar el 'Recomendado por' solo con prospectos ya existentes."""
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
+    visible_user_id = get_visible_user_id(claims, int(get_jwt_identity()))
 
     q = (request.args.get("q") or "").strip()
     if not q:
@@ -282,7 +315,10 @@ def buscar_recomendadores():
 
     like = f"%{q}%"
     results = (
-        Prospect.query.filter_by(tenant_id=tenant_id)
+        Prospect.query.filter_by(
+            tenant_id=tenant_id,
+            assigned_to_user_id=visible_user_id,
+        )
         .filter(Prospect.nombre.ilike(like))
         .order_by(Prospect.nombre.asc())
         .limit(10)
@@ -306,18 +342,17 @@ def accion_prospecto(prospect_id: int):
 
     data = request.get_json() or {}
     accion = data.get("accion")
-
-    prospect = Prospect.query.filter_by(id=prospect_id, tenant_id=tenant_id).first()
+    prospect = Prospect.query.filter_by(
+        id=prospect_id,
+        tenant_id=tenant_id,
+        assigned_to_user_id=effective_user_id,
+    ).first()
     if not prospect:
         return {"message": "Prospecto no encontrado"}, 404
     
-    role = claims.get("role")
-    if role == "collaborator" and prospect.assigned_to_user_id != effective_user_id:
-        return {"message": "No tienes permiso para modificar este prospecto"}, 403
-    
-    locked_states = {"seguimiento", "rechazado", "anexado"}
+    locked_states = {"anexado"}
     if prospect.estado in locked_states and accion in {"agendar_cita", "programar_llamada"}:
-        return {"message": "Este prospecto ya está en una etapa cerrada. Usa 'recuperar' si quieres reabrirlo."}, 409
+        return {"message": "No puedes agendar sobre un prospecto anexado."}, 409
     if accion not in {
         "sin_respuesta",
         "rechazado",
@@ -328,6 +363,7 @@ def accion_prospecto(prospect_id: int):
         "anexar",
         "vendido",
         "iniciar_seguimiento", 
+        "pausar_seguimiento",
     }:
         return {"message": "Acción no soportada"}, 400
 
@@ -353,13 +389,16 @@ def accion_prospecto(prospect_id: int):
         )
 
     elif accion == "agendar_cita":
-        fecha = data.get("fecha")  # "2025-11-20"
-        hora = data.get("hora")    # "15:30"
+        fecha = data.get("fecha")
+        hora = data.get("hora")
         ubicacion = (data.get("ubicacion") or "").strip()
         obs = (data.get("observaciones") or "").strip() or None
 
         if not fecha or not hora or not ubicacion:
             return {"message": "Fecha, hora y ubicación son obligatorias"}, 400
+
+        fecha_hora = datetime.fromisoformat(f"{fecha}T{hora}")
+
         cita_prev = (
             Appointment.query
             .filter_by(tenant_id=tenant_id, prospect_id=prospect.id)
@@ -370,8 +409,9 @@ def accion_prospecto(prospect_id: int):
 
         if cita_prev:
             cita_prev.estado = "reagendada"
+            cita_prev.resolved_at = datetime.utcnow()
+            cita_prev.estado_detalle = f"Reagendada para {_fmt_dt(fecha_hora)}"
 
-        fecha_hora = datetime.fromisoformat(f"{fecha}T{hora}")
         cita = Appointment(
             tenant_id=tenant_id,
             prospect_id=prospect.id,
@@ -380,14 +420,16 @@ def accion_prospecto(prospect_id: int):
             ubicacion=ubicacion,
             observaciones=obs,
             estado="programada",
+            estado_detalle=None,
         )
         db.session.add(cita)
 
         prospect.estado = "con_cita"
+
         if cita_prev:
-            detalle = f"Cita REAGENDADA para {fecha_hora.isoformat()} en {ubicacion}"
+            detalle = f"Cita reagendada para {_fmt_dt(fecha_hora)} en {ubicacion}"
         else:
-            detalle = f"Cita programada para {fecha_hora.isoformat()} en {ubicacion}"
+            detalle = f"Cita programada para {_fmt_dt(fecha_hora)} en {ubicacion}"
 
 
     elif accion == "programar_llamada":
@@ -402,16 +444,15 @@ def accion_prospecto(prospect_id: int):
         llamada = CallReminder(
             tenant_id=tenant_id,
             prospect_id=prospect.id,
-            created_by_user_id=effective_user_id,          
+            created_by_user_id=effective_user_id,
             fecha_hora=fecha_hora,
             observaciones=obs,
             estado="pendiente",
+            estado_detalle=None,
         )
         db.session.add(llamada)
 
-        prospect.estado = "con_llamada"
-
-        detalle = f"Llamada programada para {fecha_hora.isoformat()}"
+        detalle = f"Llamada programada para {_fmt_dt(fecha_hora)}"
 
 
     elif accion == "observaciones":
@@ -430,10 +471,6 @@ def accion_prospecto(prospect_id: int):
         detalle = data.get("motivo") or "Prospecto recuperado"
         prospect.rechazo_motivo = None
         prospect.rechazo_at = None
-        try:
-            prospect.created_at = datetime.utcnow()
-        except Exception:
-            pass
 
     elif accion == "anexar":
         prospect.estado = "anexado"
@@ -479,12 +516,14 @@ def accion_prospecto(prospect_id: int):
             return {"message": "No puedes iniciar seguimiento si no hay venta registrada."}, 409
 
         prospect.estado = "seguimiento"
+        prospect.seguimiento_pausado = False
+        prospect.seguimiento_pausado_at = None
 
         sale_date = prospect.venta_fecha or datetime.utcnow()
         _ensure_monthly_followups(
             tenant_id=tenant_id,
             prospect_id=prospect.id,
-            user_id=effective_user_id,  # ✅
+            user_id=effective_user_id,
             months=12,
             hour=10,
             minute=0,
@@ -492,6 +531,30 @@ def accion_prospecto(prospect_id: int):
         )
 
         detalle = "Seguimiento iniciado. Recordatorios mensuales creados."
+
+    elif accion == "pausar_seguimiento":
+        if prospect.estado != "seguimiento":
+            return {"message": "Solo puedes pausar seguimiento en prospectos en seguimiento."}, 409
+
+        prospect.seguimiento_pausado = True
+        prospect.seguimiento_pausado_at = datetime.utcnow()
+
+        now = datetime.utcnow()
+        calls = (
+            CallReminder.query
+            .filter_by(tenant_id=tenant_id, prospect_id=prospect.id)
+            .filter(CallReminder.estado == "pendiente")
+            .filter(CallReminder.fecha_hora >= now)
+            .filter(CallReminder.observaciones == "Seguimiento mensual (mantenimiento / nuevas citas)")
+            .all()
+        )
+
+        for c in calls:
+            c.estado = "cancelada"
+            c.estado_detalle = "Seguimiento pausado"
+            c.resolved_at = datetime.utcnow()
+
+        detalle = "Seguimiento pausado. Recordatorios pendientes cancelados."
 
     _log_history(
         tenant_id=tenant_id,
@@ -514,8 +577,13 @@ def accion_prospecto(prospect_id: int):
 def ver_historial(prospect_id: int):
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
+    visible_user_id = get_visible_user_id(claims, int(get_jwt_identity()))
 
-    prospect = Prospect.query.filter_by(id=prospect_id, tenant_id=tenant_id).first()
+    prospect = Prospect.query.filter_by(
+        id=prospect_id,
+        tenant_id=tenant_id,
+        assigned_to_user_id=visible_user_id,
+    ).first()
     if not prospect:
         return {"message": "Prospecto no encontrado"}, 404
 
@@ -566,11 +634,13 @@ def ver_historial(prospect_id: int):
 def listar_seguimiento():
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
+    visible_user_id = get_visible_user_id(claims, int(get_jwt_identity()))
 
     q = (request.args.get("q") or "").strip().lower()
     limit = int(request.args.get("limit") or 200)
 
     # subquery: próxima llamada pendiente por prospecto
+    # subquery: próxima llamada pendiente general
     sub = (
         db.session.query(
             CallReminder.prospect_id.label("prospect_id"),
@@ -582,10 +652,29 @@ def listar_seguimiento():
         .subquery()
     )
 
+    # subquery: próxima llamada de seguimiento mensual
+    sub_followup = (
+        db.session.query(
+            CallReminder.prospect_id.label("prospect_id"),
+            func.min(CallReminder.fecha_hora).label("proxima_llamada_seguimiento"),
+        )
+        .filter(CallReminder.tenant_id == tenant_id)
+        .filter(CallReminder.estado == "pendiente")
+        .filter(CallReminder.observaciones == "Seguimiento mensual (mantenimiento / nuevas citas)")
+        .group_by(CallReminder.prospect_id)
+        .subquery()
+    )
+
     query = (
-        db.session.query(Prospect, sub.c.proxima_llamada)
+        db.session.query(
+            Prospect,
+            sub.c.proxima_llamada,
+            sub_followup.c.proxima_llamada_seguimiento,
+        )
         .outerjoin(sub, sub.c.prospect_id == Prospect.id)
+        .outerjoin(sub_followup, sub_followup.c.prospect_id == Prospect.id)
         .filter(Prospect.tenant_id == tenant_id)
+        .filter(Prospect.assigned_to_user_id == visible_user_id)
         .filter(Prospect.estado == "seguimiento")
         .order_by(Prospect.updated_at.desc())
     )
@@ -606,8 +695,10 @@ def listar_seguimiento():
             {
                 **_prospect_to_dict(p),
                 "proxima_llamada": dt.isoformat() + "Z" if dt else None,
+                "proxima_llamada_seguimiento": dt_follow.isoformat() + "Z" if dt_follow else None,
+                "seguimiento_activo": bool(dt_follow) and not bool(getattr(p, "seguimiento_pausado", False)),
             }
-            for (p, dt) in rows
+            for (p, dt, dt_follow) in rows
         ]
     }, 200
 
@@ -616,10 +707,12 @@ def listar_seguimiento():
 def prospect_stats():
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
+    visible_user_id = get_visible_user_id(claims, int(get_jwt_identity()))
 
     rows = (
         db.session.query(Prospect.estado, func.count(Prospect.id))
         .filter(Prospect.tenant_id == tenant_id)
+        .filter(Prospect.assigned_to_user_id == visible_user_id)
         .group_by(Prospect.estado)
         .all()
     )
@@ -643,8 +736,13 @@ def prospect_stats():
 def prospect_amigos(prospect_id: int):
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
+    visible_user_id = get_visible_user_id(claims, int(get_jwt_identity()))
 
-    p = Prospect.query.filter_by(id=prospect_id, tenant_id=tenant_id).first()
+    p = Prospect.query.filter_by(
+        id=prospect_id,
+        tenant_id=tenant_id,
+        assigned_to_user_id=visible_user_id,
+    ).first()
     if not p:
         return {"message": "Prospecto no encontrado"}, 404
 
@@ -656,7 +754,11 @@ def prospect_amigos(prospect_id: int):
 
     recomendados = (
         Prospect.query
-        .filter_by(tenant_id=tenant_id, recomendado_por_id=p.id)
+        .filter_by(
+            tenant_id=tenant_id,
+            recomendado_por_id=p.id,
+            assigned_to_user_id=visible_user_id,
+        )
         .order_by(Prospect.created_at.desc())
         .all()
     )
@@ -664,4 +766,76 @@ def prospect_amigos(prospect_id: int):
     return {
         "recomendado_por": recomendado_por,
         "recomendados": [_prospect_to_dict(x) for x in recomendados],
+    }, 200
+
+@prospects_bp.get("/search")
+@jwt_required()
+def buscar_prospectos_global():
+    claims = get_jwt()
+    tenant_id = claims.get("tenant_id")
+    visible_user_id = get_visible_user_id(claims, int(get_jwt_identity()))
+
+    q = (request.args.get("q") or "").strip()
+    estado = (request.args.get("estado") or "todos").strip().lower()
+    limit = int(request.args.get("limit") or 100)
+
+    if limit <= 0:
+        limit = 100
+    if limit > 300:
+        limit = 300
+
+    def apply_common_filters(query):
+        query = query.filter(
+            Prospect.tenant_id == tenant_id,
+            Prospect.assigned_to_user_id == visible_user_id,
+            Prospect.estado != "anexado",
+        )
+
+        if estado and estado != "todos":
+            query = query.filter(Prospect.estado == estado)
+
+        if q:
+            like = f"%{q}%"
+            query = query.filter(
+                db.or_(
+                    Prospect.nombre.ilike(like),
+                    Prospect.numero.ilike(like),
+                    Prospect.observaciones.ilike(like),
+                    Prospect.forma_obtencion.ilike(like),
+                )
+            )
+
+        return query
+
+    query = apply_common_filters(Prospect.query)
+    prospectos = (
+        query.order_by(Prospect.updated_at.desc(), Prospect.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    resumen_query = apply_common_filters(
+        db.session.query(
+            Prospect.estado.label("estado"),
+            func.count(Prospect.id).label("cantidad"),
+        )
+    )
+
+    resumen_rows = (
+        resumen_query
+        .group_by(Prospect.estado)
+        .order_by(Prospect.estado.asc())
+        .all()
+    )
+
+    return {
+        "prospectos": [_prospect_to_dict(p) for p in prospectos],
+        "resumen_estados": [
+            {
+                "estado": r.estado,
+                "cantidad": int(r.cantidad),
+            }
+            for r in resumen_rows
+        ],
+        "total": sum(int(r.cantidad) for r in resumen_rows),
     }, 200
