@@ -37,7 +37,7 @@ def create_invite():
         tenant_id=tenant_id,
         created_by_user_id=leader_id,
         token=token,
-        expires_at=datetime.utcnow() + timedelta(hours=1),
+        expires_at=datetime.now() + timedelta(hours=1),
         max_uses=remaining,   # ✅ aquí
         uses=0,
     )
@@ -47,7 +47,7 @@ def create_invite():
     return {
         "invite": {
             "token": inv.token,
-            "expires_at": inv.expires_at.isoformat() + "Z",
+            "expires_at": inv.expires_at.isoformat(),
             "max_uses": inv.max_uses,
             "uses": inv.uses,
         }
@@ -58,9 +58,9 @@ def validate_invite(token: str):
     inv = InviteLink.query.filter_by(token=token).first()
     if not inv:
         return {"valid": False, "message": "Invitación inválida"}, 404
-    if datetime.utcnow() > inv.expires_at:
+    if datetime.now() > inv.expires_at:
         return {"valid": False, "message": "Invitación expirada"}, 410
     if inv.uses >= inv.max_uses:
         return {"valid": False, "message": "Invitación ya no disponible"}, 409
 
-    return {"valid": True, "expires_at": inv.expires_at.isoformat() + "Z"}, 200
+    return {"valid": True, "expires_at": inv.expires_at.isoformat()}, 200

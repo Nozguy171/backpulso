@@ -159,7 +159,7 @@ def signup_collaborator():
     inv = InviteLink.query.filter_by(token=token).first()
     if not inv:
         return {"message": "Invitación inválida"}, 404
-    if datetime.utcnow() > inv.expires_at:
+    if datetime.now() > inv.expires_at:
         return {"message": "Invitación expirada"}, 410
     if inv.uses >= inv.max_uses:
         return {"message": "Invitación ya no disponible"}, 409

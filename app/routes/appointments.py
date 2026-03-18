@@ -9,17 +9,35 @@ from ..models import Appointment, Prospect, User
 from ..utils.visibility import get_visible_user_id
 
 appointments_bp = Blueprint("appointments", __name__)
+APPOINTMENT_ESTADO_LABELS = {
+    "programada": "Pendiente",
+    "reagendada": "Reagendada",
+    "cancelada": "Cancelada",
+    "vendida": "Vendida",
+    "rechazada": "Rechazada",
+    "anexada": "Anexada",
+}
 
+def _humanize_key(value: str | None) -> str:
+    if not value:
+        return "—"
+    return value.replace("_", " ").strip().capitalize()
+
+def _label_from_map(value: str | None, mapping: dict[str, str]) -> str:
+    if not value:
+        return "—"
+    return mapping.get(value, _humanize_key(value))
 def _appt_to_dict(a: Appointment):
     return {
         "id": a.id,
-        "fecha_hora": a.fecha_hora.isoformat() + "Z",
+        "fecha_hora": a.fecha_hora.isoformat(),
         "ubicacion": a.ubicacion,
         "observaciones": a.observaciones,
         "estado": a.estado,
+        "estado_label": _label_from_map(a.estado, APPOINTMENT_ESTADO_LABELS),
         "estado_detalle": a.estado_detalle,
-        "resolved_at": a.resolved_at.isoformat() + "Z" if a.resolved_at else None,
-        "created_at": a.created_at.isoformat() + "Z" if getattr(a, "created_at", None) else None,
+        "resolved_at": a.resolved_at.isoformat() if a.resolved_at else None,
+        "created_at": a.created_at.isoformat() if getattr(a, "created_at", None) else None,
         "prospect": {
             "id": a.prospect.id,
             "nombre": a.prospect.nombre,

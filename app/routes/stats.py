@@ -51,7 +51,7 @@ def dashboard_stats():
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
 
-    now = datetime.utcnow()
+    now = datetime.now()
 
     sales_year = _safe_int(request.args.get("sales_year"), now.year)
     sales_granularity = (request.args.get("sales_granularity") or "month").strip().lower()

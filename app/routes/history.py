@@ -70,7 +70,7 @@ def listar_historial_general():
             "de_estado": h.de_estado,
             "a_estado": h.a_estado,
             "detalle": h.detalle,
-            "created_at": h.created_at.isoformat() + "Z",
+            "created_at": h.created_at.isoformat(),
             "prospect": {"id": p.id, "nombre": p.nombre},
 
             "user": effective_payload,
@@ -153,7 +153,7 @@ def ver_prospecto_historial_global(prospect_id: int):
         historial.append({
             "id": h.id,
             "accion": h.accion,
-            "created_at": h.created_at.isoformat() + "Z",
+            "created_at": h.created_at.isoformat(),
             "de_estado": h.de_estado,
             "a_estado": h.a_estado,
             "detalle": h.detalle,
@@ -169,7 +169,7 @@ def ver_prospecto_historial_global(prospect_id: int):
             "numero": prospect.numero,
             "observaciones": prospect.observaciones,
             "estado": prospect.estado,
-            "created_at": prospect.created_at.isoformat() + "Z",
+            "created_at": prospect.created_at.isoformat(),
         },
         "historial": historial,
     }, 200

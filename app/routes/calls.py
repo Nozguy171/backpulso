@@ -9,7 +9,27 @@ from ..models import CallReminder, Prospect, User
 from ..utils.visibility import get_visible_user_id
 
 calls_bp = Blueprint("calls", __name__)
+CALL_ESTADO_LABELS = {
+    "pendiente": "Pendiente",
+    "hecha": "Hecha",
+    "cancelada": "Cancelada",
+    "reagendada": "Reagendada",
+    "con_cita": "Cita agendada",
+    "vendida": "Vendida",
+    "rechazada": "Rechazada",
+    "sin_respuesta": "Sin respuesta",
+    "anexada": "Anexada",
+}
 
+def _humanize_key(value: str | None) -> str:
+    if not value:
+        return "—"
+    return value.replace("_", " ").strip().capitalize()
+
+def _label_from_map(value: str | None, mapping: dict[str, str]) -> str:
+    if not value:
+        return "—"
+    return mapping.get(value, _humanize_key(value))
 def _fmt_dt(dt: datetime | None) -> str | None:
     if not dt:
         return None
@@ -18,17 +38,20 @@ def _fmt_dt(dt: datetime | None) -> str | None:
 def _call_to_dict(c: CallReminder, p: Prospect = None, u: User = None):
     return {
         "id": c.id,
-        "fecha_hora": c.fecha_hora.isoformat() + "Z",
+        "fecha_hora": c.fecha_hora.isoformat(),
         "observaciones": c.observaciones,
         "estado": c.estado,
+        "estado_label": _label_from_map(c.estado, CALL_ESTADO_LABELS),
         "estado_detalle": c.estado_detalle,
-        "resolved_at": c.resolved_at.isoformat() + "Z" if c.resolved_at else None,
-        "updated_at": c.updated_at.isoformat() + "Z" if getattr(c, "updated_at", None) else None,
-        "created_at": c.created_at.isoformat() + "Z" if getattr(c, "created_at", None) else None,
+        "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
+        "updated_at": c.updated_at.isoformat() if getattr(c, "updated_at", None) else None,
+        "created_at": c.created_at.isoformat() if getattr(c, "created_at", None) else None,
         "prospect": {
             "id": p.id,
             "nombre": p.nombre,
             "numero": p.numero,
+            "estado": p.estado,
+            "venta_monto_sin_iva": float(p.venta_monto_sin_iva) if p.venta_monto_sin_iva is not None else None,
         } if p else None,
         "user": {
             "id": c.created_by_user_id,
@@ -158,7 +181,7 @@ def reagendar_llamada(call_id: int):
 
     call.estado = "reagendada"
     call.estado_detalle = f"Reagendada para {_fmt_dt(fecha_hora)}"
-    call.resolved_at = datetime.utcnow()
+    call.resolved_at = datetime.now()
 
     new_call = CallReminder(
         tenant_id=tenant_id,
@@ -206,7 +229,7 @@ def cancelar_llamada(call_id: int):
 
     call.estado = "cancelada"
     call.estado_detalle = motivo or "Llamada cancelada"
-    call.resolved_at = datetime.utcnow()
+    call.resolved_at = datetime.now()
 
     db.session.commit()
     return {"ok": True, "call": _call_to_dict(call, prospect, created_by_user)}, 200
@@ -238,7 +261,7 @@ def marcar_llamada_hecha(call_id: int):
 
     call.estado = "hecha"
     call.estado_detalle = obs or "Llamada realizada"
-    call.resolved_at = datetime.utcnow()
+    call.resolved_at = datetime.now()
 
     db.session.commit()
     return {"ok": True, "call": _call_to_dict(call, prospect, created_by_user)}, 200

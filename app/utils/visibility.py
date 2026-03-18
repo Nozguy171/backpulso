@@ -2,11 +2,14 @@ from flask import request
 from ..models import User
 
 def get_visible_user_id(claims, actor_user_id: int) -> int:
-    tenant_id = claims.get("tenant_id")
-    role = claims.get("role")
+    role = (claims or {}).get("role")
+    tenant_id = (claims or {}).get("tenant_id")
 
     acting_as = request.headers.get("X-Acting-As-User")
-    if role != "leader" or not acting_as:
+    if not acting_as:
+        return actor_user_id
+
+    if role not in ("leader", "admin"):
         return actor_user_id
 
     try:
@@ -15,4 +18,7 @@ def get_visible_user_id(claims, actor_user_id: int) -> int:
         return actor_user_id
 
     u = User.query.filter_by(id=acting_as_id, tenant_id=tenant_id).first()
-    return acting_as_id if u else actor_user_id
+    if not u:
+        return actor_user_id
+
+    return acting_as_id

@@ -77,7 +77,7 @@ def collaborators():
                 "id": u.id,
                 "email": u.email,
                 "role": u.role,
-                "created_at": u.created_at.isoformat() + "Z",
+                "created_at": u.created_at.isoformat(),
             }
             for u in collabs
         ]
