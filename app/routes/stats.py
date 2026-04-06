@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from sqlalchemy import func, distinct, extract
 
 from ..extensions import db
-from ..models import Prospect, Appointment, CallReminder, User
+from ..models import Prospect, Appointment, CallReminder, User, ProspectSale
 
 stats_bp = Blueprint("stats", __name__)
 
@@ -70,7 +70,9 @@ def dashboard_stats():
 
     def apply_prospect_scope(q):
         return q.filter(Prospect.tenant_id == tenant_id)
-
+    
+    def apply_sale_scope(q):
+        return q.filter(ProspectSale.tenant_id == tenant_id)
     # =========================
     # KPI 1: ventas del mes
     # =========================
@@ -78,29 +80,27 @@ def dashboard_stats():
     next_month_start = current_month_start + relativedelta(months=1)
     prev_month_start = current_month_start - relativedelta(months=1)
 
-    ventas_mes_query = apply_prospect_scope(
+    ventas_mes_query = apply_sale_scope(
         db.session.query(
-            func.count(Prospect.id).label("ventas"),
-            func.coalesce(func.sum(Prospect.venta_monto_sin_iva), 0).label("monto"),
+            func.count(ProspectSale.id).label("ventas"),
+            func.coalesce(func.sum(ProspectSale.monto_sin_iva), 0).label("monto"),
         )
     ).filter(
-        Prospect.venta_fecha.isnot(None),
-        Prospect.venta_fecha >= current_month_start,
-        Prospect.venta_fecha < next_month_start,
+        ProspectSale.created_at >= current_month_start,
+        ProspectSale.created_at < next_month_start,
     ).first()
 
     ventas_mes_count = int(ventas_mes_query.ventas or 0)
     ventas_mes_monto = float(ventas_mes_query.monto or 0)
 
-    ventas_prev_query = apply_prospect_scope(
+    ventas_prev_query = apply_sale_scope(
         db.session.query(
-            func.count(Prospect.id).label("ventas"),
-            func.coalesce(func.sum(Prospect.venta_monto_sin_iva), 0).label("monto"),
+            func.count(ProspectSale.id).label("ventas"),
+            func.coalesce(func.sum(ProspectSale.monto_sin_iva), 0).label("monto"),
         )
     ).filter(
-        Prospect.venta_fecha.isnot(None),
-        Prospect.venta_fecha >= prev_month_start,
-        Prospect.venta_fecha < current_month_start,
+        ProspectSale.created_at >= prev_month_start,
+        ProspectSale.created_at < current_month_start,
     ).first()
 
     ventas_prev_monto = float(ventas_prev_query.monto or 0)
@@ -175,27 +175,22 @@ def dashboard_stats():
     # month => meses de un año
     # year => años completos
     # =========================
-    available_years_rows = apply_prospect_scope(
-        db.session.query(extract("year", Prospect.venta_fecha).label("year"))
-    ).filter(
-        Prospect.venta_fecha.isnot(None)
-    ).distinct().order_by(extract("year", Prospect.venta_fecha).asc()).all()
-
+    available_years_rows = apply_sale_scope(
+        db.session.query(extract("year", ProspectSale.created_at).label("year"))
+    ).distinct().order_by(extract("year", ProspectSale.created_at).asc()).all()
     available_years = [int(r.year) for r in available_years_rows if r.year is not None]
 
     if sales_granularity == "year":
-        ventas_rows = apply_prospect_scope(
+        ventas_rows = apply_sale_scope(
             db.session.query(
-                extract("year", Prospect.venta_fecha).label("period"),
-                func.count(Prospect.id).label("ventas"),
-                func.coalesce(func.sum(Prospect.venta_monto_sin_iva), 0).label("monto"),
+                extract("year", ProspectSale.created_at).label("period"),
+                func.count(ProspectSale.id).label("ventas"),
+                func.coalesce(func.sum(ProspectSale.monto_sin_iva), 0).label("monto"),
             )
-        ).filter(
-            Prospect.venta_fecha.isnot(None)
         ).group_by(
-            extract("year", Prospect.venta_fecha)
+            extract("year", ProspectSale.created_at)
         ).order_by(
-            extract("year", Prospect.venta_fecha).asc()
+            extract("year", ProspectSale.created_at).asc()
         ).all()
 
         ventas_chart = [
@@ -207,19 +202,18 @@ def dashboard_stats():
             for r in ventas_rows
         ]
     else:
-        ventas_rows = apply_prospect_scope(
+        ventas_rows = apply_sale_scope(
             db.session.query(
-                extract("month", Prospect.venta_fecha).label("period"),
-                func.count(Prospect.id).label("ventas"),
-                func.coalesce(func.sum(Prospect.venta_monto_sin_iva), 0).label("monto"),
+                extract("month", ProspectSale.created_at).label("period"),
+                func.count(ProspectSale.id).label("ventas"),
+                func.coalesce(func.sum(ProspectSale.monto_sin_iva), 0).label("monto"),
             )
         ).filter(
-            Prospect.venta_fecha.isnot(None),
-            extract("year", Prospect.venta_fecha) == sales_year,
+            extract("year", ProspectSale.created_at) == sales_year,
         ).group_by(
-            extract("month", Prospect.venta_fecha)
+            extract("month", ProspectSale.created_at)
         ).order_by(
-            extract("month", Prospect.venta_fecha).asc()
+            extract("month", ProspectSale.created_at).asc()
         ).all()
 
         by_month = {

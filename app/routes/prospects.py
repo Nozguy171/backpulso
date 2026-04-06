@@ -4,7 +4,7 @@ from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from sqlalchemy import func
 from ..extensions import db
-from ..models import Prospect, ProspectHistory, Appointment, CallReminder, User
+from ..models import Prospect, ProspectHistory, Appointment, CallReminder, User, ProspectSale
 import calendar
 from sqlalchemy.orm import aliased
 from ..utils.visibility import get_visible_user_id
@@ -80,6 +80,7 @@ def _cancelar_todo_agendado_de_prospecto(
     call_estado: str = "cancelada",
     exclude_appointment_id: int | None = None,
     exclude_call_id: int | None = None,
+    include_followup_calls: bool = True,
 ):
     now = datetime.now()
 
@@ -93,7 +94,13 @@ def _cancelar_todo_agendado_de_prospecto(
         calls_query = calls_query.filter(CallReminder.id != exclude_call_id)
 
     calls = calls_query.all()
-
+    if not include_followup_calls:
+        calls_query = calls_query.filter(
+            db.or_(
+                CallReminder.observaciones.is_(None),
+                CallReminder.observaciones != FOLLOWUP_OBS,
+            )
+        )
     for c in calls:
         c.estado = call_estado
         c.estado_detalle = motivo
@@ -129,6 +136,7 @@ def _cancelar_llamadas_pendientes_de_prospecto(
     prospect_id: int,
     motivo: str,
     exclude_call_id: int | None = None,
+    include_followup_calls: bool = True,
 ):
     now = datetime.now()
 
@@ -140,7 +148,13 @@ def _cancelar_llamadas_pendientes_de_prospecto(
 
     if exclude_call_id is not None:
         calls_query = calls_query.filter(CallReminder.id != exclude_call_id)
-
+    if not include_followup_calls:
+        calls_query = calls_query.filter(
+            db.or_(
+                CallReminder.observaciones.is_(None),
+                CallReminder.observaciones != FOLLOWUP_OBS,
+            )
+        )
     calls = calls_query.all()
 
     for c in calls:
@@ -294,6 +308,19 @@ def _call_to_dict(c: CallReminder):
         "resolved_at": c.resolved_at.isoformat() if c.resolved_at else None,
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+    }
+
+def _sale_to_dict(s: ProspectSale):
+    return {
+        "id": s.id,
+        "tipo_venta": s.tipo_venta,
+        "tipo_venta_label": _label_from_map(s.tipo_venta, VENTA_TIPO_LABELS),
+        "monto_con_iva": float(s.monto_con_iva or 0),
+        "iva_monto": float(s.iva_monto or 0),
+        "monto_sin_iva": float(s.monto_sin_iva or 0),
+        "appointment_id": s.appointment_id,
+        "call_id": s.call_id,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
     }
 
 @prospects_bp.post("/")
@@ -510,8 +537,14 @@ def accion_prospecto(prospect_id: int):
         if not target_call:
             return {"message": "La llamada indicada no existe para este prospecto"}, 404
     locked_states = {"anexado"}
+    has_sale = prospect.venta_monto_sin_iva is not None
+
     if prospect.estado in locked_states and accion in {"agendar_cita", "programar_llamada"}:
         return {"message": "No puedes agendar sobre un prospecto anexado."}, 409
+
+    if has_sale and accion in {"rechazado", "anexar", "sin_respuesta"}:
+        return {"message": "No puedes rechazar, marcar sin respuesta ni anexar un prospecto que ya tiene ventas registradas."}, 409
+
     if accion not in {
         "sin_respuesta",
         "rechazado",
@@ -606,7 +639,12 @@ def accion_prospecto(prospect_id: int):
         )
         db.session.add(cita)
 
-        prospect.estado = "con_cita"
+        was_customer = prospect.venta_monto_sin_iva is not None or prospect.estado == "seguimiento"
+
+        if was_customer:
+            prospect.estado = "seguimiento"
+        else:
+            prospect.estado = "con_cita"
 
         if cita_prev:
             detalle = f"Cita reagendada para {_fmt_dt(fecha_hora)} en {ubicacion}"
@@ -617,12 +655,12 @@ def accion_prospecto(prospect_id: int):
             target_call.estado = "con_cita"
             target_call.estado_detalle = detalle
             target_call.resolved_at = datetime.now()
-
             _cancelar_llamadas_pendientes_de_prospecto(
                 tenant_id=tenant_id,
                 prospect_id=prospect.id,
                 motivo="Se agendó una cita para este prospecto",
                 exclude_call_id=target_call.id,
+                include_followup_calls=False if was_customer else True,
             )
 
 
@@ -723,13 +761,34 @@ def accion_prospecto(prospect_id: int):
             return {"message": "El precio sin IVA debe ser mayor a 0"}, 400
 
         now = datetime.now()
-        prospect.venta_monto_sin_iva = monto_sin_iva
+
+        venta = ProspectSale(
+            tenant_id=tenant_id,
+            prospect_id=prospect.id,
+            created_by_user_id=visible_user_id,
+            appointment_id=target_appointment.id if target_appointment else None,
+            call_id=target_call.id if target_call else None,
+            tipo_venta=tipo_venta,
+            monto_con_iva=monto_con_iva,
+            iva_monto=iva_monto,
+            monto_sin_iva=monto_sin_iva,
+        )
+        db.session.add(venta)
+
+        total_actual = float(prospect.venta_monto_sin_iva or 0)
+        nuevo_total = total_actual + monto_sin_iva
+
+        prospect.venta_monto_sin_iva = nuevo_total
         prospect.venta_fecha = now
         prospect.venta_tipo = tipo_venta
         prospect.estado = "seguimiento"
 
         tipo_label = _label_from_map(tipo_venta, VENTA_TIPO_LABELS)
-        detalle = f"Venta registrada ({tipo_label}) · Precio sin IVA: {monto_sin_iva:.2f}"
+        detalle = (
+            f"Venta registrada ({tipo_label}) · "
+            f"Venta actual sin IVA: {monto_sin_iva:.2f} · "
+            f"Total acumulado: {nuevo_total:.2f}"
+        )
 
         if target_call and target_call.estado == "pendiente":
             target_call.estado = "vendida"
@@ -743,6 +802,7 @@ def accion_prospecto(prospect_id: int):
                 appointment_estado="cancelada",
                 call_estado="cancelada",
                 exclude_call_id=target_call.id,
+                include_followup_calls=False,
             )
 
         elif target_appointment and target_appointment.estado == "programada":
@@ -757,6 +817,7 @@ def accion_prospecto(prospect_id: int):
                 appointment_estado="cancelada",
                 call_estado="cancelada",
                 exclude_appointment_id=target_appointment.id,
+                include_followup_calls=False,
             )
         else:
             cita_actual = (
@@ -766,10 +827,30 @@ def accion_prospecto(prospect_id: int):
                 .order_by(Appointment.fecha_hora.desc())
                 .first()
             )
+
             if cita_actual:
                 cita_actual.estado = "vendida"
                 cita_actual.estado_detalle = detalle
                 cita_actual.resolved_at = now
+
+                _cancelar_todo_agendado_de_prospecto(
+                    tenant_id=tenant_id,
+                    prospect_id=prospect.id,
+                    motivo="Se registró una venta para este prospecto",
+                    appointment_estado="cancelada",
+                    call_estado="cancelada",
+                    exclude_appointment_id=cita_actual.id,
+                    include_followup_calls=False,
+                )
+            else:
+                _cancelar_todo_agendado_de_prospecto(
+                    tenant_id=tenant_id,
+                    prospect_id=prospect.id,
+                    motivo="Se registró una venta para este prospecto",
+                    appointment_estado="cancelada",
+                    call_estado="cancelada",
+                    include_followup_calls=False,
+                )
 
     elif accion == "iniciar_seguimiento":
         if prospect.venta_monto_sin_iva is None:
@@ -1084,6 +1165,13 @@ def prospect_detalle(prospect_id: int):
         .all()
     )
 
+    # Ventas
+    ventas = (
+        ProspectSale.query
+        .filter_by(tenant_id=tenant_id, prospect_id=prospect.id)
+        .order_by(ProspectSale.created_at.desc())
+        .all()
+    )
     # Recomendado por
     recomendado_por = None
     if prospect.recomendado_por_id:
@@ -1113,10 +1201,13 @@ def prospect_detalle(prospect_id: int):
             "recomendados_count": len(recomendados),
             "citas_count": len(citas),
             "llamadas_count": len(llamadas),
+            "ventas_count": len(ventas),
+            "ventas_total_sin_iva": float(prospect.venta_monto_sin_iva or 0),
         },
         "recomendados": [_prospect_to_dict(x) for x in recomendados],
         "citas": [_appointment_to_dict(x) for x in citas],
         "llamadas": [_call_to_dict(x) for x in llamadas],
+        "ventas": [_sale_to_dict(x) for x in ventas],
         "historial": historial,
     }, 200
 

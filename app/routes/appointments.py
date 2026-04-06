@@ -42,6 +42,10 @@ def _appt_to_dict(a: Appointment):
             "id": a.prospect.id,
             "nombre": a.prospect.nombre,
             "numero": a.prospect.numero,
+            "estado": a.prospect.estado,
+            "forma_obtencion_tipo": a.prospect.forma_obtencion_tipo,
+            "forma_obtencion": a.prospect.forma_obtencion,
+            "venta_monto_sin_iva": float(a.prospect.venta_monto_sin_iva) if a.prospect.venta_monto_sin_iva is not None else None,
         } if a.prospect else None,
         "user": {
             "id": a.created_by_user_id,

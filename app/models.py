@@ -146,6 +146,30 @@ class CallReminder(db.Model):
 
     estado = db.Column(db.String(50), default="pendiente", index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ProspectSale(db.Model):
+    __tablename__ = "prospect_sales"
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=False, index=True)
+    prospect_id = db.Column(db.Integer, db.ForeignKey("prospects.id"), nullable=False, index=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    appointment_id = db.Column(db.Integer, db.ForeignKey("appointments.id"), nullable=True)
+    call_id = db.Column(db.Integer, db.ForeignKey("call_reminders.id"), nullable=True)
+
+    tipo_venta = db.Column(db.String(20), nullable=False)
+    monto_con_iva = db.Column(Numeric(12, 2), nullable=False)
+    iva_monto = db.Column(Numeric(12, 2), nullable=False)
+    monto_sin_iva = db.Column(Numeric(12, 2), nullable=False)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    prospect = db.relationship("Prospect", lazy="joined")
+    created_by_user = db.relationship("User", lazy="joined")
+    appointment = db.relationship("Appointment", lazy="joined")
+    call = db.relationship("CallReminder", lazy="joined")
+
 class InviteLink(db.Model):
     __tablename__ = "invite_links"
 

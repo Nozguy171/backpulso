@@ -51,6 +51,8 @@ def _call_to_dict(c: CallReminder, p: Prospect = None, u: User = None):
             "nombre": p.nombre,
             "numero": p.numero,
             "estado": p.estado,
+            "forma_obtencion_tipo": p.forma_obtencion_tipo,
+            "forma_obtencion": p.forma_obtencion,
             "venta_monto_sin_iva": float(p.venta_monto_sin_iva) if p.venta_monto_sin_iva is not None else None,
         } if p else None,
         "user": {

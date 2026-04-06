@@ -71,7 +71,13 @@ def listar_historial_general():
             "a_estado": h.a_estado,
             "detalle": h.detalle,
             "created_at": h.created_at.isoformat(),
-            "prospect": {"id": p.id, "nombre": p.nombre},
+            "prospect": {
+                "id": p.id,
+                "nombre": p.nombre,
+                "numero": p.numero,
+                "forma_obtencion_tipo": p.forma_obtencion_tipo,
+                "forma_obtencion": p.forma_obtencion,
+            },
 
             "user": effective_payload,
 
@@ -115,6 +121,8 @@ def listar_prospectos_historial():
                 "numero": p.numero,
                 "estado": p.estado,
                 "observaciones": p.observaciones,
+                "forma_obtencion_tipo": p.forma_obtencion_tipo,
+                "forma_obtencion": p.forma_obtencion,
             }
             for p in rows
         ]
@@ -170,6 +178,8 @@ def ver_prospecto_historial_global(prospect_id: int):
             "observaciones": prospect.observaciones,
             "estado": prospect.estado,
             "created_at": prospect.created_at.isoformat(),
+            "forma_obtencion_tipo": prospect.forma_obtencion_tipo,
+            "forma_obtencion": prospect.forma_obtencion,
         },
         "historial": historial,
     }, 200
