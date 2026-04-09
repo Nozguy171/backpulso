@@ -446,7 +446,7 @@ def listar_prospectos():
 
     if estado:
         query = query.filter_by(estado=estado)
-        
+
     if estado == "pendiente":
         subq_calls_pendientes = (
             db.session.query(CallReminder.prospect_id)
@@ -1158,23 +1158,38 @@ def prospect_stats():
 
     def g(key: str) -> int:
         return int(by_estado.get(key, 0))
+    subq_pending_calls = (
+        db.session.query(CallReminder.prospect_id)
+        .filter(CallReminder.tenant_id == tenant_id)
+        .filter(CallReminder.estado == "pendiente")
+        .subquery()
+    )
 
-    pendientes = g("pendiente")
+    pendientes = (
+        db.session.query(func.count(Prospect.id))
+        .filter(Prospect.tenant_id == tenant_id)
+        .filter(Prospect.assigned_to_user_id == visible_user_id)
+        .filter(Prospect.estado == "pendiente")
+        .filter(~Prospect.id.in_(subq_pending_calls))
+        .scalar()
+    ) or 0
+
     sin_respuesta = g("sin_respuesta")
-    total_prospectos = pendientes + sin_respuesta
-    total_clientes = g("seguimiento") 
+
+    total_prospectos = g("pendiente") + sin_respuesta
+
+    total_clientes = g("seguimiento")
     total_general = sum(by_estado.values())
 
     return {
-        "total": total_prospectos, 
-        "total_prospectos": total_prospectos,
-        "total_clientes": total_clientes,
-        "total_general": total_general,
-        "pendientes": pendientes,
-        "sin_respuesta": sin_respuesta,
+        "total": int(total_prospectos),
+        "total_prospectos": int(total_prospectos),
+        "total_clientes": int(total_clientes),
+        "total_general": int(total_general),
+        "pendientes": int(pendientes),
+        "sin_respuesta": int(sin_respuesta),
         "by_estado": by_estado,
     }, 200
-
 @prospects_bp.get("/<int:prospect_id>/detalle")
 @jwt_required()
 def prospect_detalle(prospect_id: int):
