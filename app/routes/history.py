@@ -24,8 +24,8 @@ def listar_historial_general():
     effective_user_id = request.args.get("effective_user_id")
 
     user_id = request.args.get("user_id")
-    if user_id and not effective_user_id:
-        effective_user_id = user_id
+    if user_id and not actor_user_id and not effective_user_id:
+        actor_user_id = user_id
 
     prospect_id = request.args.get("prospect_id")
 
@@ -79,7 +79,7 @@ def listar_historial_general():
                 "forma_obtencion": p.forma_obtencion,
             },
 
-            "user": effective_payload,
+            "user": actor_payload,
 
             "actor": actor_payload,
             "effective": effective_payload,
@@ -165,7 +165,7 @@ def ver_prospecto_historial_global(prospect_id: int):
             "de_estado": h.de_estado,
             "a_estado": h.a_estado,
             "detalle": h.detalle,
-            "user": effective_payload,
+            "user": actor_payload,
             "actor": actor_payload,
             "effective": effective_payload,
         })

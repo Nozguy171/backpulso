@@ -24,6 +24,7 @@ ACCION_LABELS = {
     "pausar_seguimiento": "Seguimiento pausado",
 }
 FOLLOWUP_OBS = "Seguimiento mensual (mantenimiento / nuevas citas)"
+POST_SALE_FOLLOWUP_OBS = "Postventa: confirmar llegada del producto"
 PROSPECT_ESTADO_LABELS = {
     "pendiente": "Pendiente",
     "sin_respuesta": "Sin respuesta",
@@ -421,7 +422,7 @@ def crear_prospecto():
             accion="observaciones",
             de_estado="pendiente",
             a_estado="pendiente",
-            detalle=f"Observaciones añadidas: {observaciones}",
+            detalle=f"[CREACION] {observaciones}",
         )
 
     db.session.commit()
@@ -582,6 +583,17 @@ def accion_prospecto(prospect_id: int):
 
         motivo_resolucion = f"Prospecto rechazado. {detalle}"
 
+        _log_history(
+            tenant_id=tenant_id,
+            prospect_id=prospect.id,
+            actor_user_id=actor_user_id,
+            effective_user_id=visible_user_id,
+            accion="observaciones",
+            de_estado=de_estado,
+            a_estado="rechazado",
+            detalle=f"[RECHAZO] {detalle}",
+        )
+
         if target_call and target_call.estado in {"pendiente", "con_cita"}:
             target_call.estado = "rechazada"
             target_call.estado_detalle = motivo_resolucion
@@ -651,6 +663,18 @@ def accion_prospecto(prospect_id: int):
         else:
             detalle = f"Cita programada para {_fmt_dt(fecha_hora)} en {ubicacion}"
 
+        if obs:
+            _log_history(
+                tenant_id=tenant_id,
+                prospect_id=prospect.id,
+                actor_user_id=actor_user_id,
+                effective_user_id=visible_user_id,
+                accion="observaciones",
+                de_estado=de_estado,
+                a_estado=prospect.estado,
+                detalle=f"[CITA] {obs}",
+            )
+
         if target_call and target_call.estado == "pendiente":
             target_call.estado = "con_cita"
             target_call.estado_detalle = detalle
@@ -684,7 +708,23 @@ def accion_prospecto(prospect_id: int):
         )
         db.session.add(llamada)
 
+        # ✅ si estaba en sin_respuesta, vuelve a prospectos (pendiente)
+        if de_estado == "sin_respuesta":
+            prospect.estado = "pendiente"
+
         detalle = f"Llamada programada para {_fmt_dt(fecha_hora)}"
+
+        if obs:
+            _log_history(
+                tenant_id=tenant_id,
+                prospect_id=prospect.id,
+                actor_user_id=actor_user_id,
+                effective_user_id=visible_user_id,
+                accion="observaciones",
+                de_estado=de_estado,
+                a_estado=prospect.estado,
+                detalle=f"[LLAMADA] {obs}",
+            )
 
 
     elif accion == "observaciones":
@@ -697,7 +737,7 @@ def accion_prospecto(prospect_id: int):
         else:
             prospect.observaciones = obs
 
-        detalle = f"Observaciones añadidas: {obs}"
+        detalle = f"[MANUAL] {obs}"
     elif accion == "recuperar":
         prospect.estado = "pendiente"
         detalle = data.get("motivo") or "Prospecto recuperado"
@@ -759,6 +799,17 @@ def accion_prospecto(prospect_id: int):
 
         if monto_sin_iva <= 0:
             return {"message": "El precio sin IVA debe ser mayor a 0"}, 400
+
+        fecha = (data.get("fecha") or "").strip()
+        hora = (data.get("hora") or "").strip()
+
+        if not fecha or not hora:
+            return {"message": "Fecha y hora son obligatorias para la llamada postventa"}, 400
+
+        try:
+            followup_dt = datetime.fromisoformat(f"{fecha}T{hora}")
+        except Exception:
+            return {"message": "Fecha u hora inválidas para la llamada postventa"}, 400
 
         now = datetime.now()
 
@@ -851,6 +902,19 @@ def accion_prospecto(prospect_id: int):
                     call_estado="cancelada",
                     include_followup_calls=False,
                 )
+            db.session.add(
+                CallReminder(
+                    tenant_id=tenant_id,
+                    prospect_id=prospect.id,
+                    created_by_user_id=actor_user_id,
+                    fecha_hora=followup_dt,
+                    observaciones=POST_SALE_FOLLOWUP_OBS,
+                    estado="pendiente",
+                    estado_detalle=None,
+                )
+            )
+
+            detalle = f"{detalle} · Llamada postventa programada para {_fmt_dt(followup_dt)}"
 
     elif accion == "iniciar_seguimiento":
         if prospect.venta_monto_sin_iva is None:
@@ -909,6 +973,8 @@ def accion_prospecto(prospect_id: int):
             c.resolved_at = datetime.now()
 
         detalle = "Seguimiento pausado. Recordatorios pendientes cancelados."
+
+
 
     _log_history(
         tenant_id=tenant_id,
@@ -969,7 +1035,7 @@ def ver_historial(prospect_id: int):
             "a_estado_label": _label_from_map(h.a_estado, PROSPECT_ESTADO_LABELS) if h.a_estado else None,
             "detalle": h.detalle,
 
-            "user": effective_payload,
+            "user": actor_payload,
             "actor": actor_payload,
             "effective": effective_payload,
         })
