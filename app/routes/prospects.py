@@ -446,10 +446,24 @@ def listar_prospectos():
 
     if estado:
         query = query.filter_by(estado=estado)
+        
+    if estado == "pendiente":
+        subq_calls_pendientes = (
+            db.session.query(CallReminder.prospect_id)
+            .filter(CallReminder.tenant_id == tenant_id)
+            .filter(CallReminder.estado == "pendiente")
+            .subquery()
+        )
+        query = query.filter(~Prospect.id.in_(subq_calls_pendientes))
 
     if q:
         like = f"%{q}%"
-        query = query.filter(db.or_(Prospect.nombre.ilike(like), Prospect.numero.ilike(like)))
+        query = query.filter(
+            db.or_(
+                Prospect.nombre.ilike(like),
+                Prospect.numero.ilike(like),
+            )
+        )
 
     query = query.order_by(Prospect.created_at.desc())
     return {"prospectos": [_prospect_to_dict(p) for p in query.all()]}, 200
