@@ -5,7 +5,7 @@ from flask_jwt_extended import jwt_required, get_jwt
 from sqlalchemy import and_, func
 from flask_jwt_extended import get_jwt_identity
 from ..extensions import db
-from ..models import CallReminder, Prospect, User
+from ..models import CallReminder, Prospect, ProspectHistory, User
 from ..utils.visibility import get_visible_user_id
 
 calls_bp = Blueprint("calls", __name__)
@@ -35,6 +35,27 @@ def _fmt_dt(dt: datetime | None) -> str | None:
         return None
     return dt.strftime("%Y-%m-%d %H:%M")
 
+def _log_history(
+    tenant_id: int,
+    prospect_id: int,
+    actor_user_id: int,
+    effective_user_id: int,
+    accion: str,
+    de_estado: str | None = None,
+    a_estado: str | None = None,
+    detalle: str | None = None,
+):
+    db.session.add(ProspectHistory(
+        tenant_id=tenant_id,
+        prospect_id=prospect_id,
+        actor_user_id=actor_user_id,
+        effective_user_id=effective_user_id,
+        accion=accion,
+        de_estado=de_estado,
+        a_estado=a_estado,
+        detalle=detalle,
+    ))
+
 def _call_to_dict(c: CallReminder, p: Prospect = None, u: User = None):
     return {
         "id": c.id,
@@ -53,6 +74,9 @@ def _call_to_dict(c: CallReminder, p: Prospect = None, u: User = None):
             "estado": p.estado,
             "forma_obtencion_tipo": p.forma_obtencion_tipo,
             "forma_obtencion": p.forma_obtencion,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "seguimiento_pausado": bool(getattr(p, "seguimiento_pausado", False)),
+            "seguimiento_fecha_base": p.seguimiento_fecha_base.isoformat() if getattr(p, "seguimiento_fecha_base", None) else None,
             "venta_monto_sin_iva": float(p.venta_monto_sin_iva) if p.venta_monto_sin_iva is not None else None,
         } if p else None,
         "user": {
@@ -181,8 +205,10 @@ def reagendar_llamada(call_id: int):
 
     fecha_hora = datetime.fromisoformat(f"{fecha}T{hora}")
 
+    old_estado = call.estado
+    detalle = f"Llamada reagendada para {_fmt_dt(fecha_hora)}"
     call.estado = "reagendada"
-    call.estado_detalle = f"Reagendada para {_fmt_dt(fecha_hora)}"
+    call.estado_detalle = detalle
     call.resolved_at = datetime.now()
 
     new_call = CallReminder(
@@ -196,6 +222,16 @@ def reagendar_llamada(call_id: int):
         resolved_at=None,
     )
     db.session.add(new_call)
+    _log_history(
+        tenant_id=tenant_id,
+        prospect_id=prospect.id,
+        actor_user_id=actor_user_id,
+        effective_user_id=visible_user_id,
+        accion="programar_llamada",
+        de_estado=old_estado,
+        a_estado=call.estado,
+        detalle=detalle,
+    )
     db.session.commit()
 
     return {
@@ -229,9 +265,20 @@ def cancelar_llamada(call_id: int):
     if prospect.assigned_to_user_id != visible_user_id:
         return {"message": "Llamada no encontrada"}, 404
 
+    old_estado = call.estado
     call.estado = "cancelada"
     call.estado_detalle = motivo or "Llamada cancelada"
     call.resolved_at = datetime.now()
+    _log_history(
+        tenant_id=tenant_id,
+        prospect_id=prospect.id,
+        actor_user_id=actor_user_id,
+        effective_user_id=visible_user_id,
+        accion="observaciones",
+        de_estado=old_estado,
+        a_estado=call.estado,
+        detalle=f"[LLAMADA] {call.estado_detalle}",
+    )
 
     db.session.commit()
     return {"ok": True, "call": _call_to_dict(call, prospect, created_by_user)}, 200
@@ -261,9 +308,23 @@ def marcar_llamada_hecha(call_id: int):
     if prospect.assigned_to_user_id != visible_user_id:
         return {"message": "Llamada no encontrada"}, 404
 
+    old_estado = call.estado
+    old_prospect_estado = prospect.estado
     call.estado = "hecha"
     call.estado_detalle = obs or "Llamada realizada"
     call.resolved_at = datetime.now()
+    if prospect.venta_monto_sin_iva is None and prospect.estado not in {"anexado", "rechazado"}:
+        prospect.estado = "pendiente"
+    _log_history(
+        tenant_id=tenant_id,
+        prospect_id=prospect.id,
+        actor_user_id=actor_user_id,
+        effective_user_id=visible_user_id,
+        accion="observaciones",
+        de_estado=old_prospect_estado,
+        a_estado=prospect.estado,
+        detalle=f"[LLAMADA] {call.estado_detalle}",
+    )
 
     db.session.commit()
     return {"ok": True, "call": _call_to_dict(call, prospect, created_by_user)}, 200

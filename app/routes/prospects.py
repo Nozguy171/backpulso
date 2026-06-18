@@ -916,19 +916,19 @@ def accion_prospecto(prospect_id: int):
                     call_estado="cancelada",
                     include_followup_calls=False,
                 )
-            db.session.add(
-                CallReminder(
-                    tenant_id=tenant_id,
-                    prospect_id=prospect.id,
-                    created_by_user_id=actor_user_id,
-                    fecha_hora=followup_dt,
-                    observaciones=POST_SALE_FOLLOWUP_OBS,
-                    estado="pendiente",
-                    estado_detalle=None,
-                )
-            )
 
-            detalle = f"{detalle} · Llamada postventa programada para {_fmt_dt(followup_dt)}"
+        db.session.add(
+            CallReminder(
+                tenant_id=tenant_id,
+                prospect_id=prospect.id,
+                created_by_user_id=actor_user_id,
+                fecha_hora=followup_dt,
+                observaciones=POST_SALE_FOLLOWUP_OBS,
+                estado="pendiente",
+                estado_detalle=None,
+            )
+        )
+        detalle = f"{detalle} · Llamada postventa programada para {_fmt_dt(followup_dt)}"
 
     elif accion == "iniciar_seguimiento":
         if prospect.venta_monto_sin_iva is None:

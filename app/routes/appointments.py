@@ -5,12 +5,13 @@ from sqlalchemy import and_
 from sqlalchemy import func
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from ..extensions import db
-from ..models import Appointment, Prospect, User
+from ..models import Appointment, Prospect, ProspectHistory, User
 from ..utils.visibility import get_visible_user_id
 
 appointments_bp = Blueprint("appointments", __name__)
 APPOINTMENT_ESTADO_LABELS = {
     "programada": "Pendiente",
+    "realizada": "Realizada",
     "reagendada": "Reagendada",
     "cancelada": "Cancelada",
     "vendida": "Vendida",
@@ -27,6 +28,28 @@ def _label_from_map(value: str | None, mapping: dict[str, str]) -> str:
     if not value:
         return "—"
     return mapping.get(value, _humanize_key(value))
+
+def _log_history(
+    tenant_id: int,
+    prospect_id: int,
+    actor_user_id: int,
+    effective_user_id: int,
+    accion: str,
+    de_estado: str | None = None,
+    a_estado: str | None = None,
+    detalle: str | None = None,
+):
+    db.session.add(ProspectHistory(
+        tenant_id=tenant_id,
+        prospect_id=prospect_id,
+        actor_user_id=actor_user_id,
+        effective_user_id=effective_user_id,
+        accion=accion,
+        de_estado=de_estado,
+        a_estado=a_estado,
+        detalle=detalle,
+    ))
+
 def _appt_to_dict(a: Appointment):
     return {
         "id": a.id,
@@ -45,6 +68,9 @@ def _appt_to_dict(a: Appointment):
             "estado": a.prospect.estado,
             "forma_obtencion_tipo": a.prospect.forma_obtencion_tipo,
             "forma_obtencion": a.prospect.forma_obtencion,
+            "created_at": a.prospect.created_at.isoformat() if a.prospect.created_at else None,
+            "seguimiento_pausado": bool(getattr(a.prospect, "seguimiento_pausado", False)),
+            "seguimiento_fecha_base": a.prospect.seguimiento_fecha_base.isoformat() if getattr(a.prospect, "seguimiento_fecha_base", None) else None,
             "venta_monto_sin_iva": float(a.prospect.venta_monto_sin_iva) if a.prospect.venta_monto_sin_iva is not None else None,
         } if a.prospect else None,
         "user": {
@@ -144,3 +170,46 @@ def dias_con_citas():
     return {
         "days": [{"day": str(r.day), "count": int(r.count)} for r in rows]
     }, 200
+
+
+@appointments_bp.post("/<int:appointment_id>/marcar-realizada")
+@jwt_required()
+def marcar_cita_realizada(appointment_id: int):
+    claims = get_jwt()
+    tenant_id = claims.get("tenant_id")
+    actor_user_id = int(get_jwt_identity())
+    visible_user_id = get_visible_user_id(claims, actor_user_id)
+
+    data = request.get_json() or {}
+    obs = (data.get("observaciones") or "").strip() or None
+
+    cita = (
+        Appointment.query
+        .filter(Appointment.id == appointment_id, Appointment.tenant_id == tenant_id)
+        .join(Prospect, Prospect.id == Appointment.prospect_id)
+        .filter(Prospect.assigned_to_user_id == visible_user_id)
+        .first()
+    )
+    if not cita:
+        return {"message": "Cita no encontrada"}, 404
+
+    old_estado = cita.estado
+    old_prospect_estado = cita.prospect.estado if cita.prospect else None
+    cita.estado = "realizada"
+    cita.estado_detalle = obs or "Cita realizada"
+    cita.resolved_at = datetime.now()
+    if cita.prospect and cita.prospect.venta_monto_sin_iva is None and cita.prospect.estado not in {"anexado", "rechazado"}:
+        cita.prospect.estado = "pendiente"
+    _log_history(
+        tenant_id=tenant_id,
+        prospect_id=cita.prospect_id,
+        actor_user_id=actor_user_id,
+        effective_user_id=visible_user_id,
+        accion="observaciones",
+        de_estado=old_prospect_estado,
+        a_estado=cita.prospect.estado if cita.prospect else None,
+        detalle=f"[CITA] {cita.estado_detalle}",
+    )
+
+    db.session.commit()
+    return {"ok": True, "cita": _appt_to_dict(cita)}, 200

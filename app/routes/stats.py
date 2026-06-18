@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from dateutil.relativedelta import relativedelta
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
@@ -9,6 +10,8 @@ from ..models import Prospect, Appointment, CallReminder, User, ProspectSale
 
 stats_bp = Blueprint("stats", __name__)
 
+LOCAL_TZ = ZoneInfo("America/Tijuana")
+UTC = ZoneInfo("UTC")
 MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 WEEKDAYS_ES = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
@@ -39,11 +42,173 @@ def _month_range(year: int, month: int):
     return start, end
 
 
+def _local_now():
+    return datetime.now(LOCAL_TZ)
+
+
+def _utc_naive(local_dt):
+    return local_dt.astimezone(UTC).replace(tzinfo=None)
+
+
+def _local_day_range(day: str):
+    d = datetime.fromisoformat(day).date()
+    start = datetime.combine(d, datetime.min.time(), tzinfo=LOCAL_TZ)
+    return _utc_naive(start), _utc_naive(start + timedelta(days=1))
+
+
+def _local_month_range(year: int, month: int):
+    start = datetime(year, month, 1, tzinfo=LOCAL_TZ)
+    return _utc_naive(start), _utc_naive(start + relativedelta(months=1))
+
+
+def _local_date(dt):
+    return dt.replace(tzinfo=UTC).astimezone(LOCAL_TZ).date() if dt else None
+
+
+def _local_iso(dt):
+    return dt.replace(tzinfo=UTC).astimezone(LOCAL_TZ).replace(tzinfo=None).isoformat() if dt else None
+
+
 def _safe_int(value, default: int) -> int:
     try:
         return int(value)
     except Exception:
         return default
+
+def _sale_item(s: ProspectSale):
+    tipo_venta = (s.tipo_venta or "venta").title()
+    return {
+        "id": s.id,
+        "tipo": "Venta",
+        "titulo": s.prospect.nombre if s.prospect else f"Venta #{s.id}",
+        "fecha": _local_iso(s.created_at),
+        "detalle": f"{tipo_venta} - ${float(s.monto_sin_iva or 0):,.2f} sin IVA · Usuario: {s.created_by_user.username if s.created_by_user else 'Sin usuario'}",
+        "prospect_id": s.prospect_id,
+    }
+
+def _prospect_item(p: Prospect, tipo="Prospecto"):
+    u = db.session.get(User, p.assigned_to_user_id)
+    return {
+        "id": p.id,
+        "tipo": tipo,
+        "titulo": p.nombre,
+        "fecha": _local_iso(p.created_at),
+        "detalle": f"{p.numero} · {p.estado} · Usuario: {u.username if u else 'Sin usuario'}",
+        "prospect_id": p.id,
+    }
+
+def _call_item(c: CallReminder):
+    p = db.session.get(Prospect, c.prospect_id)
+    u = db.session.get(User, c.created_by_user_id)
+    return {
+        "id": c.id,
+        "tipo": "Llamada",
+        "titulo": p.nombre if p else f"Llamada #{c.id}",
+        "fecha": c.fecha_hora.isoformat() if c.fecha_hora else None,
+        "detalle": f"{c.estado_detalle or c.observaciones or c.estado} · Usuario: {u.username if u else 'Sin usuario'}",
+        "prospect_id": c.prospect_id,
+    }
+
+def _appointment_item(a: Appointment):
+    return {
+        "id": a.id,
+        "tipo": "Cita",
+        "titulo": a.prospect.nombre if getattr(a, "prospect", None) else f"Cita #{a.id}",
+        "fecha": a.fecha_hora.isoformat() if a.fecha_hora else None,
+        "detalle": f"{a.ubicacion} · {a.estado} · Usuario: {a.created_by_user.username if a.created_by_user else 'Sin usuario'}",
+        "prospect_id": a.prospect_id,
+    }
+
+def _date_range_from_day(day: str):
+    return _local_day_range(day)
+
+@stats_bp.get("/details")
+@jwt_required()
+def stats_details():
+    tenant_id = get_jwt().get("tenant_id")
+    kind = (request.args.get("kind") or "").strip()
+    limit = min(_safe_int(request.args.get("limit"), 100), 300)
+    now = _local_now()
+
+    items = []
+    title = "Detalle"
+
+    if kind == "sales_month":
+        start, end = _local_month_range(now.year, now.month)
+        rows = ProspectSale.query.filter_by(tenant_id=tenant_id).filter(ProspectSale.created_at >= start, ProspectSale.created_at < end).order_by(ProspectSale.created_at.desc()).limit(limit).all()
+        title = "Ventas del mes"
+        items = [_sale_item(x) for x in rows]
+
+    elif kind == "sales_period":
+        granularity = request.args.get("granularity") or "month"
+        period = request.args.get("period") or ""
+        q = ProspectSale.query.filter_by(tenant_id=tenant_id)
+        if granularity == "year":
+            q = q.filter(extract("year", ProspectSale.created_at) == _safe_int(period, now.year))
+            title = f"Ventas {period}"
+        else:
+            year = _safe_int(request.args.get("year"), now.year)
+            month = (MONTHS_ES.index(period) + 1) if period in MONTHS_ES else now.month
+            start, end = _local_month_range(year, month)
+            q = q.filter(ProspectSale.created_at >= start, ProspectSale.created_at < end)
+            title = f"Ventas {period} {year}"
+        items = [_sale_item(x) for x in q.order_by(ProspectSale.created_at.desc()).limit(limit).all()]
+
+    elif kind == "status":
+        estado = request.args.get("estado") or ""
+        rows = Prospect.query.filter_by(tenant_id=tenant_id, estado=estado).order_by(Prospect.created_at.desc()).limit(limit).all()
+        title = f"Prospectos: {ESTADO_LABELS.get(estado, estado)}"
+        items = [_prospect_item(x) for x in rows]
+
+    elif kind == "with_appointment":
+        rows = (Prospect.query.filter_by(tenant_id=tenant_id).join(Appointment, Appointment.prospect_id == Prospect.id).distinct().order_by(Prospect.created_at.desc()).limit(limit).all())
+        title = "Prospectos con cita"
+        items = [_prospect_item(x) for x in rows]
+
+    elif kind == "sold_with_appointment":
+        rows = (Prospect.query.filter_by(tenant_id=tenant_id).join(Appointment, Appointment.prospect_id == Prospect.id).filter(Prospect.venta_monto_sin_iva.isnot(None)).distinct().order_by(Prospect.venta_fecha.desc()).limit(limit).all())
+        title = "Vendidos con cita"
+        items = [_prospect_item(x, "Venta") for x in rows]
+
+    elif kind == "calls_done":
+        rows = CallReminder.query.filter_by(tenant_id=tenant_id, estado="hecha").order_by(CallReminder.fecha_hora.desc()).limit(limit).all()
+        title = "Llamadas realizadas"
+        items = [_call_item(x) for x in rows]
+
+    elif kind == "collaborator":
+        user_id = _safe_int(request.args.get("user_id"), 0)
+        metric = request.args.get("metric") or "vendidos"
+        collab_mode = (request.args.get("collab_mode") or "always").strip().lower()
+        collab_year = _safe_int(request.args.get("collab_year"), now.year)
+        collab_month = _safe_int(request.args.get("collab_month"), now.month)
+        q = Prospect.query.filter_by(tenant_id=tenant_id, assigned_to_user_id=user_id)
+        if collab_mode == "month":
+            start, end = _local_month_range(collab_year, collab_month)
+            q = q.filter(Prospect.created_at >= start, Prospect.created_at < end)
+        if metric == "vendidos":
+            q = q.filter(Prospect.venta_monto_sin_iva.isnot(None))
+            title = "Ventas del colaborador"
+        elif metric == "citas":
+            q = q.join(Appointment, Appointment.prospect_id == Prospect.id).distinct()
+            title = "Citas del colaborador"
+        else:
+            title = "Prospectos del colaborador"
+        items = [_prospect_item(x) for x in q.order_by(Prospect.created_at.desc()).limit(limit).all()]
+
+    elif kind == "week_activity":
+        day = request.args.get("day") or now.date().isoformat()
+        metric = request.args.get("metric") or "llamadas"
+        start, end = _date_range_from_day(day)
+        if metric == "citas":
+            rows = Appointment.query.filter_by(tenant_id=tenant_id).filter(Appointment.created_at >= start, Appointment.created_at < end).order_by(Appointment.created_at.desc()).limit(limit).all()
+            title = f"Citas creadas {day}"
+            items = [_appointment_item(x) for x in rows]
+        else:
+            rows = CallReminder.query.filter_by(tenant_id=tenant_id).filter(CallReminder.created_at >= start, CallReminder.created_at < end).order_by(CallReminder.created_at.desc()).limit(limit).all()
+            title = f"Llamadas creadas {day}"
+            items = [_call_item(x) for x in rows]
+
+    return {"title": title, "items": items}, 200
 
 @stats_bp.get("/dashboard")
 @jwt_required()
@@ -51,7 +216,7 @@ def dashboard_stats():
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
 
-    now = datetime.now()
+    now = _local_now()
 
     sales_year = _safe_int(request.args.get("sales_year"), now.year)
     sales_granularity = (request.args.get("sales_granularity") or "month").strip().lower()
@@ -76,9 +241,8 @@ def dashboard_stats():
     # =========================
     # KPI 1: ventas del mes
     # =========================
-    current_month_start = datetime(now.year, now.month, 1)
-    next_month_start = current_month_start + relativedelta(months=1)
-    prev_month_start = current_month_start - relativedelta(months=1)
+    current_month_start, next_month_start = _local_month_range(now.year, now.month)
+    prev_month_start = _utc_naive(datetime(now.year, now.month, 1, tzinfo=LOCAL_TZ) - relativedelta(months=1))
 
     ventas_mes_query = apply_sale_scope(
         db.session.query(
@@ -237,39 +401,42 @@ def dashboard_stats():
     # Actividad semanal real
     # llamadas/citas creadas en últimos 7 días
     # =========================
-    week_start = datetime.combine((now.date() - timedelta(days=6)), datetime.min.time())
-    week_end = datetime.combine(now.date() + timedelta(days=1), datetime.min.time())
+    week_start_local = datetime.combine(now.date() - timedelta(days=6), datetime.min.time(), tzinfo=LOCAL_TZ)
+    week_start = _utc_naive(week_start_local)
+    week_end = _utc_naive(week_start_local + timedelta(days=7))
 
-    calls_week_q = (
-        db.session.query(
-            func.date(CallReminder.created_at).label("day"),
-            func.count(CallReminder.id).label("count"),
-        )
+    calls_week_rows = (
+        db.session.query(CallReminder.created_at)
         .join(Prospect, Prospect.id == CallReminder.prospect_id)
         .filter(CallReminder.tenant_id == tenant_id)
         .filter(CallReminder.created_at >= week_start, CallReminder.created_at < week_end)
+        .all()
     )
-    calls_week_rows = calls_week_q.group_by(func.date(CallReminder.created_at)).all()
 
-    appts_week_q = (
-        db.session.query(
-            func.date(Appointment.created_at).label("day"),
-            func.count(Appointment.id).label("count"),
-        )
+    appts_week_rows = (
+        db.session.query(Appointment.created_at)
         .join(Prospect, Prospect.id == Appointment.prospect_id)
         .filter(Appointment.tenant_id == tenant_id)
         .filter(Appointment.created_at >= week_start, Appointment.created_at < week_end)
+        .all()
     )
-    appts_week_rows = appts_week_q.group_by(func.date(Appointment.created_at)).all()
 
-    calls_by_day = {str(r.day): int(r.count) for r in calls_week_rows}
-    appts_by_day = {str(r.day): int(r.count) for r in appts_week_rows}
+    calls_by_day = {}
+    for r in calls_week_rows:
+        k = str(_local_date(r.created_at))
+        calls_by_day[k] = calls_by_day.get(k, 0) + 1
+
+    appts_by_day = {}
+    for r in appts_week_rows:
+        k = str(_local_date(r.created_at))
+        appts_by_day[k] = appts_by_day.get(k, 0) + 1
 
     actividad_semanal = []
     for i in range(7):
-        d = (week_start + timedelta(days=i)).date()
+        d = (week_start_local + timedelta(days=i)).date()
         d_key = str(d)
         actividad_semanal.append({
+            "day": d_key,
             "dia": WEEKDAYS_ES[d.weekday()],
             "llamadas": calls_by_day.get(d_key, 0),
             "citas": appts_by_day.get(d_key, 0),
@@ -286,7 +453,7 @@ def dashboard_stats():
     collab_start = None
     collab_end = None
     if collab_mode == "month":
-        collab_start, collab_end = _month_range(collab_year, collab_month)
+        collab_start, collab_end = _local_month_range(collab_year, collab_month)
 
     users_q = (
         User.query
