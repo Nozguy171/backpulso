@@ -181,6 +181,18 @@ def _set_prospect_estado(prospect: Prospect, nuevo_estado: str | None):
     return de_estado, nuevo_estado
 
 
+def _monthly_followup_target(anchor_dt: datetime, month_offset: int, day: int | None = None) -> datetime:
+    dt_month = anchor_dt + relativedelta(months=month_offset)
+    last_day = calendar.monthrange(dt_month.year, dt_month.month)[1]
+    return datetime(
+        dt_month.year,
+        dt_month.month,
+        min(day or anchor_dt.day, last_day),
+        anchor_dt.hour,
+        anchor_dt.minute,
+    )
+
+
 def _ensure_monthly_followups(
     tenant_id: int,
     prospect_id: int,
@@ -188,25 +200,20 @@ def _ensure_monthly_followups(
     anchor_dt: datetime,
     months: int = 12,
     start_month_offset: int = 1,
+    day: int | None = None,
 ):
     """
     Genera llamadas mensuales tomando como base `anchor_dt`.
     - Si el día no existe en un mes, usa el último día disponible.
-    - `start_month_offset=1`: empieza el siguiente mes (inicio normal).
-    - `start_month_offset=0`: incluye el mismo mes de anchor_dt (reanudar).
+    - `start_month_offset=1`: empieza el siguiente mes.
     - Evita duplicar SOLO recordatorios mensuales de seguimiento.
     """
     created = 0
     offset = start_month_offset
 
     while created < months:
-        dt_month = anchor_dt + relativedelta(months=offset)
-        y, m = dt_month.year, dt_month.month
-
-        last_day = calendar.monthrange(y, m)[1]
-        safe_day = min(anchor_dt.day, last_day)
-
-        target = datetime(y, m, safe_day, anchor_dt.hour, anchor_dt.minute)
+        target = _monthly_followup_target(anchor_dt, offset, day)
+        y, m = target.year, target.month
 
         month_start = datetime(y, m, 1)
         month_end = month_start + relativedelta(months=1)
@@ -821,6 +828,7 @@ def accion_prospecto(prospect_id: int):
             return {"message": "El precio sin IVA debe ser mayor a 0"}, 400
 
         fecha = (data.get("fecha") or "").strip()
+        dia_raw = data.get("dia")
         hora = (data.get("hora") or "").strip()
 
         if not fecha or not hora:
@@ -941,15 +949,28 @@ def accion_prospecto(prospect_id: int):
             return {"message": "No puedes iniciar seguimiento si no hay venta registrada."}, 409
 
         fecha = (data.get("fecha") or "").strip()
+        dia_raw = data.get("dia")
         hora = (data.get("hora") or "").strip()
 
         # si está pausado, esto cuenta como reanudar y SÍ pide fecha/hora
         is_resume = bool(prospect.seguimiento_pausado)
 
-        if not fecha or not hora:
-            return {"message": "Fecha y hora son obligatorias para iniciar/reanudar seguimiento."}, 400
+        if not hora or (not fecha and dia_raw in (None, "")):
+            return {"message": "Día y hora son obligatorios para iniciar/reanudar seguimiento."}, 400
 
-        anchor_dt = datetime.fromisoformat(f"{fecha}T{hora}")
+        if dia_raw not in (None, ""):
+            try:
+                dia = int(dia_raw)
+                hour, minute = [int(x) for x in hora.split(":")[:2]]
+            except Exception:
+                return {"message": "Día u hora inválidos."}, 400
+            if dia < 1 or dia > 31:
+                return {"message": "El día debe estar entre 1 y 31."}, 400
+            now = datetime.now()
+            anchor_dt = _monthly_followup_target(datetime(now.year, now.month, 1, hour, minute), 0, dia)
+        else:
+            anchor_dt = datetime.fromisoformat(f"{fecha}T{hora}")
+            dia = anchor_dt.day
 
         prospect.estado = "seguimiento"
         prospect.seguimiento_pausado = False
@@ -962,13 +983,14 @@ def accion_prospecto(prospect_id: int):
             user_id=actor_user_id,
             anchor_dt=anchor_dt,
             months=12,
-            start_month_offset=0 if is_resume else 1,
+            start_month_offset=1,
+            day=dia,
         )
 
         if is_resume:
-            detalle = f"Seguimiento reanudado. Recordatorios mensuales reprogramados desde {_fmt_dt(anchor_dt)}."
+            detalle = f"Seguimiento reanudado. Recordatorios mensuales reprogramados desde el siguiente mes usando como base {_fmt_dt(anchor_dt)}."
         else:
-            detalle = f"Seguimiento iniciado. Recordatorios mensuales programados usando como base {_fmt_dt(anchor_dt)}."
+            detalle = f"Seguimiento iniciado. Recordatorios mensuales programados desde el siguiente mes usando como base {_fmt_dt(anchor_dt)}."
 
     elif accion == "pausar_seguimiento":
         if prospect.estado != "seguimiento":
@@ -977,22 +999,18 @@ def accion_prospecto(prospect_id: int):
         prospect.seguimiento_pausado = True
         prospect.seguimiento_pausado_at = datetime.now()
 
-        now = datetime.now()
         calls = (
             CallReminder.query
             .filter_by(tenant_id=tenant_id, prospect_id=prospect.id)
-            .filter(CallReminder.estado == "pendiente")
-            .filter(CallReminder.fecha_hora >= now)
+            .filter(CallReminder.estado.in_(["pendiente", "cancelada"]))
             .filter(CallReminder.observaciones == FOLLOWUP_OBS)
             .all()
         )
 
         for c in calls:
-            c.estado = "cancelada"
-            c.estado_detalle = "Seguimiento pausado"
-            c.resolved_at = datetime.now()
+            db.session.delete(c)
 
-        detalle = "Seguimiento pausado. Recordatorios pendientes cancelados."
+        detalle = "Seguimiento pausado. Recordatorios mensuales pendientes borrados."
 
 
 
@@ -1264,6 +1282,7 @@ def prospect_detalle(prospect_id: int):
     llamadas = (
         CallReminder.query
         .filter_by(tenant_id=tenant_id, prospect_id=prospect.id)
+        .filter(CallReminder.estado == "hecha")
         .order_by(CallReminder.fecha_hora.desc())
         .all()
     )

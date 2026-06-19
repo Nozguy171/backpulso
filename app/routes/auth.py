@@ -89,7 +89,7 @@ def signup():
     return {
         "message": "Cuenta creada correctamente",
         "access_token": access_token,
-        "user": {"id": user.id, "email": user.email, "tenant_id": user.tenant_id, "role": user.role},
+        "user": {"id": user.id, "email": user.email, "tenant_id": user.tenant_id, "role": user.role, "theme": user.theme},
     }, 201
 
 @auth_bp.post("/login")
@@ -114,6 +114,7 @@ def login():
         additional_claims={
             "tenant_id": user.tenant_id,
             "role": user.role,
+            "theme": user.theme,
         },
     )
 
@@ -125,6 +126,7 @@ def login():
             "email": user.email,
             "tenant_id": user.tenant_id,
             "role": user.role,
+            "theme": user.theme,
         },
     }, 200
 
@@ -196,5 +198,5 @@ def signup_collaborator():
     return {
         "message": "Colaborador creado correctamente",
         "access_token": access_token,
-        "user": {"id": user.id, "email": user.email, "tenant_id": user.tenant_id, "role": user.role},
+        "user": {"id": user.id, "email": user.email, "tenant_id": user.tenant_id, "role": user.role, "theme": user.theme},
     }, 201

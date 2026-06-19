@@ -1,7 +1,10 @@
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from ..models import User, Tenant
+from ..extensions import db
 users_bp = Blueprint("users", __name__)
+
+ALLOWED_THEMES = {"royal-emerald", "royal-amethyst", "royal-sapphire", "royal-ivory"}
 
 def _require_leader_or_admin():
     role = (get_jwt() or {}).get("role")
@@ -30,8 +33,38 @@ def me():
             "email": u.email,
             "tenant_id": u.tenant_id,
             "role": u.role,
+            "theme": u.theme or "royal-emerald",
         }
     }, 200
+
+@users_bp.patch("/me/settings")
+@jwt_required()
+def update_me_settings():
+    user_id = int(get_jwt_identity())
+    u = User.query.get(user_id)
+    if not u:
+        return {"message": "Usuario no encontrado"}, 404
+
+    data = request.get_json() or {}
+    theme = data.get("theme")
+    current_password = data.get("current_password") or ""
+    new_password = data.get("new_password") or ""
+    confirm_password = data.get("confirm_password") or ""
+
+    if theme is not None:
+        if theme not in ALLOWED_THEMES:
+            return {"message": "Estilo inválido"}, 400
+        u.theme = theme
+
+    if new_password or confirm_password or current_password:
+        if not current_password or not u.check_password(current_password):
+            return {"message": "Contraseña actual inválida"}, 400
+        if not new_password or new_password != confirm_password:
+            return {"message": "Las contraseñas no coinciden"}, 400
+        u.set_password(new_password)
+
+    db.session.commit()
+    return {"ok": True, "user": {"id": u.id, "email": u.email, "role": u.role, "theme": u.theme}}, 200
 
 @users_bp.get("/limits")
 @jwt_required()

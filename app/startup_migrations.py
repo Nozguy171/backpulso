@@ -9,6 +9,18 @@ from .extensions import db
 
 MIGRATIONS = (
     "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS numero_encuesta VARCHAR(80)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(40) NOT NULL DEFAULT 'royal-emerald'",
+    """
+    UPDATE users
+    SET theme = 'royal-emerald'
+    WHERE theme IS NULL
+       OR theme NOT IN ('royal-emerald', 'royal-amethyst', 'royal-sapphire', 'royal-ivory')
+    """,
+    """
+    DELETE FROM call_reminders
+    WHERE observaciones = 'Seguimiento mensual (mantenimiento / nuevas citas)'
+      AND estado = 'cancelada'
+    """,
 )
 
 
