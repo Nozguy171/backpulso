@@ -262,6 +262,7 @@ def _prospect_to_dict(p: Prospect):
         "id": p.id,
         "nombre": p.nombre,
         "numero": p.numero,
+        "numero_encuesta": p.numero_encuesta,
         "observaciones": p.observaciones,
         "estado": p.estado,
         "estado_label": _label_from_map(p.estado, PROSPECT_ESTADO_LABELS),
@@ -337,6 +338,7 @@ def crear_prospecto():
     data = request.get_json() or {}
     nombre = (data.get("nombre") or "").strip()
     numero = (data.get("numero") or "").strip()
+    numero_encuesta = (data.get("numero_encuesta") or "").strip()
     observaciones = (data.get("observaciones") or "").strip() or None
     recomendado_por_id = data.get("recomendado_por_id")
     assigned_to_user_id = data.get("assigned_to_user_id")
@@ -344,8 +346,10 @@ def crear_prospecto():
     forma_obtencion_tipo = (data.get("forma_obtencion_tipo") or "").strip()
     forma_obtencion = (data.get("forma_obtencion") or "").strip()
 
-    if not nombre or not numero:
-        return {"message": "Nombre y número son obligatorios"}, 400
+    if not nombre or not numero or not numero_encuesta:
+        return {"message": "Nombre, número y número de encuesta son obligatorios"}, 400
+    if not numero_encuesta.isdigit():
+        return {"message": "El número de encuesta solo puede contener dígitos"}, 400
 
     if forma_obtencion_tipo not in {"encuesta", "cita_en_frio", "otro"}:
         return {"message": "forma_obtencion_tipo inválido"}, 400
@@ -391,6 +395,7 @@ def crear_prospecto():
         assigned_to_user_id=assigned_to_user_id,
         nombre=nombre,
         numero=numero,
+        numero_encuesta=numero_encuesta,
         observaciones=observaciones,
         recomendado_por=recomendado_prospect,
         forma_obtencion_tipo=forma_obtencion_tipo,
@@ -400,7 +405,7 @@ def crear_prospecto():
     db.session.add(prospect)
     db.session.flush()
 
-    detalle_historial = f"Forma de obtención: {forma_obtencion}"
+    detalle_historial = f"Forma de obtención: {forma_obtencion} · Encuesta: {numero_encuesta}"
 
     _log_history(
         tenant_id=tenant_id,
@@ -462,6 +467,7 @@ def listar_prospectos():
             db.or_(
                 Prospect.nombre.ilike(like),
                 Prospect.numero.ilike(like),
+                Prospect.numero_encuesta.ilike(like),
             )
         )
 
@@ -495,7 +501,7 @@ def buscar_recomendadores():
 
     return {
         "prospectos": [
-            {"id": p.id, "nombre": p.nombre, "numero": p.numero} for p in results
+            {"id": p.id, "nombre": p.nombre, "numero": p.numero, "numero_encuesta": p.numero_encuesta} for p in results
         ]
     }, 200
 
@@ -1059,6 +1065,7 @@ def ver_historial(prospect_id: int):
             "id": prospect.id,
             "nombre": prospect.nombre,
             "numero": prospect.numero,
+            "numero_encuesta": prospect.numero_encuesta,
             "observaciones": prospect.observaciones,
             "estado": prospect.estado,
             "created_at": prospect.created_at.isoformat(),
@@ -1122,6 +1129,7 @@ def listar_seguimiento():
             db.or_(
                 Prospect.nombre.ilike(like),
                 Prospect.numero.ilike(like),
+                Prospect.numero_encuesta.ilike(like),
             )
         )
 
@@ -1380,6 +1388,7 @@ def buscar_prospectos_global():
                 db.or_(
                     Prospect.nombre.ilike(like),
                     Prospect.numero.ilike(like),
+                    Prospect.numero_encuesta.ilike(like),
                     Prospect.observaciones.ilike(like),
                     Prospect.forma_obtencion.ilike(like),
                 )

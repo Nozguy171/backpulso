@@ -71,6 +71,7 @@ def _call_to_dict(c: CallReminder, p: Prospect = None, u: User = None):
             "id": p.id,
             "nombre": p.nombre,
             "numero": p.numero,
+            "numero_encuesta": p.numero_encuesta,
             "estado": p.estado,
             "forma_obtencion_tipo": p.forma_obtencion_tipo,
             "forma_obtencion": p.forma_obtencion,

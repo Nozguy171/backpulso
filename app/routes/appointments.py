@@ -65,6 +65,7 @@ def _appt_to_dict(a: Appointment):
             "id": a.prospect.id,
             "nombre": a.prospect.nombre,
             "numero": a.prospect.numero,
+            "numero_encuesta": a.prospect.numero_encuesta,
             "estado": a.prospect.estado,
             "forma_obtencion_tipo": a.prospect.forma_obtencion_tipo,
             "forma_obtencion": a.prospect.forma_obtencion,

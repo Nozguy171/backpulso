@@ -75,6 +75,7 @@ def listar_historial_general():
                 "id": p.id,
                 "nombre": p.nombre,
                 "numero": p.numero,
+                "numero_encuesta": p.numero_encuesta,
                 "forma_obtencion_tipo": p.forma_obtencion_tipo,
                 "forma_obtencion": p.forma_obtencion,
             },
@@ -108,6 +109,7 @@ def listar_prospectos_historial():
             db.or_(
                 Prospect.nombre.ilike(like),
                 Prospect.numero.ilike(like),
+                Prospect.numero_encuesta.ilike(like),
             )
         )
 
@@ -119,6 +121,7 @@ def listar_prospectos_historial():
                 "id": p.id,
                 "nombre": p.nombre,
                 "numero": p.numero,
+                "numero_encuesta": p.numero_encuesta,
                 "estado": p.estado,
                 "observaciones": p.observaciones,
                 "forma_obtencion_tipo": p.forma_obtencion_tipo,
@@ -175,6 +178,7 @@ def ver_prospecto_historial_global(prospect_id: int):
             "id": prospect.id,
             "nombre": prospect.nombre,
             "numero": prospect.numero,
+            "numero_encuesta": prospect.numero_encuesta,
             "observaciones": prospect.observaciones,
             "estado": prospect.estado,
             "created_at": prospect.created_at.isoformat(),
