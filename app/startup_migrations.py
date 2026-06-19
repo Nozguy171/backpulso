@@ -1,7 +1,7 @@
 import os
 import time
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 
 from .extensions import db
@@ -35,7 +35,7 @@ def run_startup_migrations(app):
         try:
             _run_once(app)
             return
-        except OperationalError as e:
+        except SQLAlchemyError as e:
             if attempt == max_retries:
                 raise
             print(f"[MIGRATIONS] DB no lista ({attempt}/{max_retries}): {e}")
@@ -44,10 +44,8 @@ def run_startup_migrations(app):
 
 def _run_once(app):
     with app.app_context():
-        locked = False
-        db.session.execute(text("SELECT pg_advisory_lock(80520240619)"))
-        locked = True
         try:
+            db.session.execute(text("SELECT pg_advisory_xact_lock(80520240619)"))
             for sql in MIGRATIONS:
                 db.session.execute(text(sql))
             db.session.commit()
@@ -56,7 +54,4 @@ def _run_once(app):
             db.session.rollback()
             raise
         finally:
-            if locked:
-                db.session.execute(text("SELECT pg_advisory_unlock(80520240619)"))
-                db.session.commit()
             db.session.remove()
