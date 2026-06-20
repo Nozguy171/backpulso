@@ -9,6 +9,7 @@ from .extensions import db
 
 MIGRATIONS = (
     "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS numero_encuesta VARCHAR(80)",
+    "ALTER TABLE prospects ALTER COLUMN numero_encuesta DROP NOT NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(40) NOT NULL DEFAULT 'royal-emerald'",
     """
     UPDATE users

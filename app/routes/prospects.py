@@ -353,19 +353,23 @@ def crear_prospecto():
     forma_obtencion_tipo = (data.get("forma_obtencion_tipo") or "").strip()
     forma_obtencion = (data.get("forma_obtencion") or "").strip()
 
-    if not nombre or not numero or not numero_encuesta:
-        return {"message": "Nombre, número y número de encuesta son obligatorios"}, 400
-    if not numero_encuesta.isdigit():
-        return {"message": "El número de encuesta solo puede contener dígitos"}, 400
+    if not nombre or not numero:
+        return {"message": "Nombre y número son obligatorios"}, 400
 
     if forma_obtencion_tipo not in {"encuesta", "cita_en_frio", "otro"}:
         return {"message": "forma_obtencion_tipo inválido"}, 400
 
     if forma_obtencion_tipo == "encuesta":
+        if not numero_encuesta:
+            return {"message": "El número de encuesta es obligatorio"}, 400
+        if not numero_encuesta.isdigit():
+            return {"message": "El número de encuesta solo puede contener dígitos"}, 400
         forma_obtencion = "Encuesta"
     elif forma_obtencion_tipo == "cita_en_frio":
+        numero_encuesta = None
         forma_obtencion = "Cita en frío"
     elif forma_obtencion_tipo == "otro":
+        numero_encuesta = None
         if not forma_obtencion:
             return {"message": "Debes especificar la forma de obtención cuando eliges 'otro'"}, 400
 
@@ -412,7 +416,9 @@ def crear_prospecto():
     db.session.add(prospect)
     db.session.flush()
 
-    detalle_historial = f"Forma de obtención: {forma_obtencion} · Encuesta: {numero_encuesta}"
+    detalle_historial = f"Forma de obtención: {forma_obtencion}"
+    if numero_encuesta:
+        detalle_historial += f" · Encuesta: {numero_encuesta}"
 
     _log_history(
         tenant_id=tenant_id,

@@ -31,6 +31,20 @@ ESTADO_COLORS = {
     "rechazado": "#ef4444",
 }
 
+ACTIVITY_STATUS_LABELS = {
+    "programada": "Pendiente",
+    "pendiente": "Pendiente",
+    "realizada": "Realizada",
+    "hecha": "Realizada",
+    "reagendada": "Reagendada",
+    "cancelada": "Cancelada",
+    "vendida": "Venta",
+    "rechazada": "Rechazada",
+    "con_cita": "Cita agendada",
+    "sin_respuesta": "Sin respuesta",
+    "anexada": "Anexada",
+}
+
 
 def _pct(num: int, den: int) -> float:
     return round((num / den) * 100, 2) if den else 0.0
@@ -105,7 +119,10 @@ def _call_item(c: CallReminder):
         "tipo": "Llamada",
         "titulo": p.nombre if p else f"Llamada #{c.id}",
         "fecha": c.fecha_hora.isoformat() if c.fecha_hora else None,
-        "detalle": f"{c.estado_detalle or c.observaciones or c.estado} · Usuario: {u.username if u else 'Sin usuario'}",
+        "detalle": f"{c.observaciones or 'Sin observaciones'} · Usuario: {u.username if u else 'Sin usuario'}",
+        "estado": c.estado,
+        "estado_label": ACTIVITY_STATUS_LABELS.get(c.estado, c.estado.replace("_", " ").capitalize()),
+        "conclusion": c.estado_detalle,
         "prospect_id": c.prospect_id,
     }
 
@@ -115,7 +132,10 @@ def _appointment_item(a: Appointment):
         "tipo": "Cita",
         "titulo": a.prospect.nombre if getattr(a, "prospect", None) else f"Cita #{a.id}",
         "fecha": a.fecha_hora.isoformat() if a.fecha_hora else None,
-        "detalle": f"{a.ubicacion} · {a.estado} · Usuario: {a.created_by_user.username if a.created_by_user else 'Sin usuario'}",
+        "detalle": f"{a.ubicacion} · {a.observaciones or 'Sin observaciones'} · Usuario: {a.created_by_user.username if a.created_by_user else 'Sin usuario'}",
+        "estado": a.estado,
+        "estado_label": ACTIVITY_STATUS_LABELS.get(a.estado, a.estado.replace("_", " ").capitalize()),
+        "conclusion": a.estado_detalle,
         "prospect_id": a.prospect_id,
     }
 
@@ -161,9 +181,9 @@ def stats_details():
         items = [_prospect_item(x) for x in rows]
 
     elif kind == "with_appointment":
-        rows = (Prospect.query.filter_by(tenant_id=tenant_id).join(Appointment, Appointment.prospect_id == Prospect.id).distinct().order_by(Prospect.created_at.desc()).limit(limit).all())
-        title = "Prospectos con cita"
-        items = [_prospect_item(x) for x in rows]
+        rows = Appointment.query.filter_by(tenant_id=tenant_id).order_by(Appointment.fecha_hora.desc()).limit(limit).all()
+        title = "Citas agendadas"
+        items = [_appointment_item(x) for x in rows]
 
     elif kind == "sold_with_appointment":
         rows = (Prospect.query.filter_by(tenant_id=tenant_id).join(Appointment, Appointment.prospect_id == Prospect.id).filter(Prospect.venta_monto_sin_iva.isnot(None)).distinct().order_by(Prospect.venta_fecha.desc()).limit(limit).all())
