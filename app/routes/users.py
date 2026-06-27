@@ -33,7 +33,8 @@ def me():
             "email": u.email,
             "tenant_id": u.tenant_id,
             "role": u.role,
-            "theme": u.theme or "royal-emerald",
+            "theme": u.theme or "royal-sapphire",
+            "is_platform_admin": bool(u.is_platform_admin),
         }
     }, 200
 

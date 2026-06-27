@@ -26,11 +26,15 @@ services:
       FLASK_DEBUG: ${FLASK_DEBUG}
       JWT_DAYS: ${JWT_DAYS}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      PULSO_AUTO_MIGRATE: ${PULSO_AUTO_MIGRATE:-1}
       PULSO_MIGRATION_RETRIES: 60
       PULSO_MIGRATION_RETRY_SECONDS: 2
+      PULSO_ADMIN_LOGIN: ${PULSO_ADMIN_LOGIN:-}
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - pulso_crm_documents:/app/instance/documents
     ports:
       - "8085:8000"
     restart: unless-stopped
@@ -43,3 +47,4 @@ services:
 
 volumes:
   pulso_crm_pgdata_v2:
+  pulso_crm_documents:

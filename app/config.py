@@ -7,5 +7,6 @@ class Config:
 
     JWT_SECRET_KEY = os.environ["JWT_SECRET_KEY"]
     DEBUG = os.getenv("FLASK_DEBUG", "0") == "1"
+    PULSO_ADMIN_ENABLED = os.getenv("PULSO_ADMIN_ENABLED", "0") == "1"
 
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=int(os.getenv("JWT_DAYS", "2")))

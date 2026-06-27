@@ -55,6 +55,8 @@ def _appt_to_dict(a: Appointment):
         "id": a.id,
         "fecha_hora": a.fecha_hora.isoformat(),
         "ubicacion": a.ubicacion,
+        "ubicacion_lat": a.ubicacion_lat,
+        "ubicacion_lng": a.ubicacion_lng,
         "observaciones": a.observaciones,
         "estado": a.estado,
         "estado_label": _label_from_map(a.estado, APPOINTMENT_ESTADO_LABELS),

@@ -148,6 +148,7 @@ def dias_con_llamadas():
     estado = request.args.get("estado")
     from_ = request.args.get("from")
     to_ = request.args.get("to")
+    before = request.args.get("before")
 
     q = (
         db.session.query(
@@ -168,6 +169,9 @@ def dias_con_llamadas():
     if to_:
         d = datetime.fromisoformat(to_).date()
         q = q.filter(CallReminder.fecha_hora < datetime.combine(d, datetime.min.time()) + timedelta(days=1))
+    if before:
+        before_dt = datetime.fromisoformat(before.replace("Z", ""))
+        q = q.filter(CallReminder.fecha_hora < before_dt)
 
     rows = q.all()
     return {"days": [{"day": str(r.day), "count": int(r.count)} for r in rows]}, 200
@@ -308,6 +312,8 @@ def marcar_llamada_hecha(call_id: int):
 
     if prospect.assigned_to_user_id != visible_user_id:
         return {"message": "Llamada no encontrada"}, 404
+    if prospect.estado == "pendiente":
+        return {"message": "No puedes marcar como realizada una llamada de un prospecto que sigue en Prospectos."}, 409
 
     old_estado = call.estado
     old_prospect_estado = prospect.estado

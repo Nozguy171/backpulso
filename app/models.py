@@ -32,7 +32,8 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=False)
 
     role = db.Column(db.String(30), nullable=False, default="leader")
-    theme = db.Column(db.String(40), nullable=False, default="royal-emerald")
+    theme = db.Column(db.String(40), nullable=False, default="royal-sapphire")
+    is_platform_admin = db.Column(db.Boolean, nullable=False, default=False)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -116,6 +117,8 @@ class Appointment(db.Model):
 
     fecha_hora = db.Column(db.DateTime, nullable=False)
     ubicacion = db.Column(db.String(255), nullable=False)
+    ubicacion_lat = db.Column(db.Float, nullable=True)
+    ubicacion_lng = db.Column(db.Float, nullable=True)
     observaciones = db.Column(db.Text, nullable=True)
 
     estado = db.Column(db.String(50), default="programada", index=True)
@@ -156,6 +159,8 @@ class ProspectSale(db.Model):
     tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=False, index=True)
     prospect_id = db.Column(db.Integer, db.ForeignKey("prospects.id"), nullable=False, index=True)
     created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    sold_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    effective_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
 
     appointment_id = db.Column(db.Integer, db.ForeignKey("appointments.id"), nullable=True)
     call_id = db.Column(db.Integer, db.ForeignKey("call_reminders.id"), nullable=True)
@@ -168,9 +173,53 @@ class ProspectSale(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     prospect = db.relationship("Prospect", lazy="joined")
-    created_by_user = db.relationship("User", lazy="joined")
+    created_by_user = db.relationship("User", foreign_keys=[created_by_user_id], lazy="joined")
+    sold_by_user = db.relationship("User", foreign_keys=[sold_by_user_id], lazy="joined")
+    effective_user = db.relationship("User", foreign_keys=[effective_user_id], lazy="joined")
     appointment = db.relationship("Appointment", lazy="joined")
     call = db.relationship("CallReminder", lazy="joined")
+
+class ProspectDocument(db.Model):
+    __tablename__ = "prospect_documents"
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=False, index=True)
+    prospect_id = db.Column(db.Integer, db.ForeignKey("prospects.id"), nullable=False, index=True)
+    uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    doc_type = db.Column(db.String(60), nullable=False, index=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_path = db.Column(db.String(500), nullable=False)
+    mime_type = db.Column(db.String(120), nullable=True)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    deleted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    prospect = db.relationship("Prospect", lazy="joined")
+    uploaded_by_user = db.relationship("User", foreign_keys=[uploaded_by_user_id], lazy="joined")
+    deleted_by_user = db.relationship("User", foreign_keys=[deleted_by_user_id], lazy="joined")
+
+class DocumentTemplate(db.Model):
+    __tablename__ = "document_templates"
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=False, index=True)
+    uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    doc_type = db.Column(db.String(60), nullable=False, default="formato", index=True)
+    name = db.Column(db.String(180), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_path = db.Column(db.String(500), nullable=False)
+    mime_type = db.Column(db.String(120), nullable=True)
+    size_bytes = db.Column(db.Integer, nullable=False, default=0)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    deleted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    uploaded_by_user = db.relationship("User", foreign_keys=[uploaded_by_user_id], lazy="joined")
+    deleted_by_user = db.relationship("User", foreign_keys=[deleted_by_user_id], lazy="joined")
 
 class InviteLink(db.Model):
     __tablename__ = "invite_links"
@@ -190,3 +239,18 @@ class InviteLink(db.Model):
     @staticmethod
     def new_token() -> str:
         return secrets.token_urlsafe(32)
+
+
+class AdminAudit(db.Model):
+    __tablename__ = "admin_audit"
+
+    id = db.Column(db.Integer, primary_key=True)
+    admin_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    action = db.Column(db.String(100), nullable=False)
+    target_type = db.Column(db.String(50), nullable=False)
+    target_id = db.Column(db.Integer, nullable=False)
+    tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=True)
+    details = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    admin_user = db.relationship("User", foreign_keys=[admin_user_id], lazy="joined")

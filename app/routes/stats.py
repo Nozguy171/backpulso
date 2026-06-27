@@ -7,6 +7,7 @@ from sqlalchemy import func, distinct, extract
 
 from ..extensions import db
 from ..models import Prospect, Appointment, CallReminder, User, ProspectSale
+from ..utils.visibility import get_visible_user_id
 
 stats_bp = Blueprint("stats", __name__)
 
@@ -89,6 +90,13 @@ def _safe_int(value, default: int) -> int:
     except Exception:
         return default
 
+def _stats_scope_user_id(claims):
+    actor_user_id = int(get_jwt_identity())
+    role = (claims or {}).get("role")
+    if role in ("leader", "admin") and not request.headers.get("X-Acting-As-User"):
+        return None
+    return get_visible_user_id(claims, actor_user_id)
+
 def _sale_item(s: ProspectSale):
     tipo_venta = (s.tipo_venta or "venta").title()
     return {
@@ -96,7 +104,7 @@ def _sale_item(s: ProspectSale):
         "tipo": "Venta",
         "titulo": s.prospect.nombre if s.prospect else f"Venta #{s.id}",
         "fecha": _local_iso(s.created_at),
-        "detalle": f"{tipo_venta} - ${float(s.monto_sin_iva or 0):,.2f} sin IVA · Usuario: {s.created_by_user.username if s.created_by_user else 'Sin usuario'}",
+        "detalle": f"{tipo_venta} - ${float(s.monto_sin_iva or 0):,.2f} sin IVA · Usuario: {s.sold_by_user.username if s.sold_by_user else 'Sin usuario'}",
         "prospect_id": s.prospect_id,
     }
 
@@ -133,6 +141,8 @@ def _appointment_item(a: Appointment):
         "titulo": a.prospect.nombre if getattr(a, "prospect", None) else f"Cita #{a.id}",
         "fecha": a.fecha_hora.isoformat() if a.fecha_hora else None,
         "detalle": f"{a.ubicacion} · {a.observaciones or 'Sin observaciones'} · Usuario: {a.created_by_user.username if a.created_by_user else 'Sin usuario'}",
+        "ubicacion_lat": getattr(a, "ubicacion_lat", None),
+        "ubicacion_lng": getattr(a, "ubicacion_lng", None),
         "estado": a.estado,
         "estado_label": ACTIVITY_STATUS_LABELS.get(a.estado, a.estado.replace("_", " ").capitalize()),
         "conclusion": a.estado_detalle,
@@ -145,7 +155,9 @@ def _date_range_from_day(day: str):
 @stats_bp.get("/details")
 @jwt_required()
 def stats_details():
-    tenant_id = get_jwt().get("tenant_id")
+    claims = get_jwt()
+    tenant_id = claims.get("tenant_id")
+    scope_user_id = _stats_scope_user_id(claims)
     kind = (request.args.get("kind") or "").strip()
     limit = min(_safe_int(request.args.get("limit"), 100), 300)
     now = _local_now()
@@ -153,16 +165,32 @@ def stats_details():
     items = []
     title = "Detalle"
 
+    def apply_prospect_scope(q):
+        q = q.filter(Prospect.tenant_id == tenant_id)
+        return q.filter(Prospect.assigned_to_user_id == scope_user_id) if scope_user_id else q
+
+    def apply_sale_scope(q):
+        q = q.filter(ProspectSale.tenant_id == tenant_id)
+        return q.filter(ProspectSale.effective_user_id == scope_user_id) if scope_user_id else q
+
+    def apply_appointment_scope(q):
+        q = q.join(Prospect, Prospect.id == Appointment.prospect_id).filter(Appointment.tenant_id == tenant_id)
+        return q.filter(Prospect.assigned_to_user_id == scope_user_id) if scope_user_id else q
+
+    def apply_call_scope(q):
+        q = q.join(Prospect, Prospect.id == CallReminder.prospect_id).filter(CallReminder.tenant_id == tenant_id)
+        return q.filter(Prospect.assigned_to_user_id == scope_user_id) if scope_user_id else q
+
     if kind == "sales_month":
         start, end = _local_month_range(now.year, now.month)
-        rows = ProspectSale.query.filter_by(tenant_id=tenant_id).filter(ProspectSale.created_at >= start, ProspectSale.created_at < end).order_by(ProspectSale.created_at.desc()).limit(limit).all()
+        rows = apply_sale_scope(ProspectSale.query).filter(ProspectSale.created_at >= start, ProspectSale.created_at < end).order_by(ProspectSale.created_at.desc()).limit(limit).all()
         title = "Ventas del mes"
         items = [_sale_item(x) for x in rows]
 
     elif kind == "sales_period":
         granularity = request.args.get("granularity") or "month"
         period = request.args.get("period") or ""
-        q = ProspectSale.query.filter_by(tenant_id=tenant_id)
+        q = apply_sale_scope(ProspectSale.query)
         if granularity == "year":
             q = q.filter(extract("year", ProspectSale.created_at) == _safe_int(period, now.year))
             title = f"Ventas {period}"
@@ -176,27 +204,29 @@ def stats_details():
 
     elif kind == "status":
         estado = request.args.get("estado") or ""
-        rows = Prospect.query.filter_by(tenant_id=tenant_id, estado=estado).order_by(Prospect.created_at.desc()).limit(limit).all()
+        rows = apply_prospect_scope(Prospect.query).filter(Prospect.estado == estado).order_by(Prospect.created_at.desc()).limit(limit).all()
         title = f"Prospectos: {ESTADO_LABELS.get(estado, estado)}"
         items = [_prospect_item(x) for x in rows]
 
     elif kind == "with_appointment":
-        rows = Appointment.query.filter_by(tenant_id=tenant_id).order_by(Appointment.fecha_hora.desc()).limit(limit).all()
+        rows = apply_appointment_scope(Appointment.query).order_by(Appointment.fecha_hora.desc()).limit(limit).all()
         title = "Citas agendadas"
         items = [_appointment_item(x) for x in rows]
 
     elif kind == "sold_with_appointment":
-        rows = (Prospect.query.filter_by(tenant_id=tenant_id).join(Appointment, Appointment.prospect_id == Prospect.id).filter(Prospect.venta_monto_sin_iva.isnot(None)).distinct().order_by(Prospect.venta_fecha.desc()).limit(limit).all())
+        rows = (apply_prospect_scope(Prospect.query).join(Appointment, Appointment.prospect_id == Prospect.id).filter(Prospect.venta_monto_sin_iva.isnot(None)).distinct().order_by(Prospect.venta_fecha.desc()).limit(limit).all())
         title = "Vendidos con cita"
         items = [_prospect_item(x, "Venta") for x in rows]
 
     elif kind == "calls_done":
-        rows = CallReminder.query.filter_by(tenant_id=tenant_id, estado="hecha").order_by(CallReminder.fecha_hora.desc()).limit(limit).all()
+        rows = apply_call_scope(CallReminder.query).filter(CallReminder.estado == "hecha").order_by(CallReminder.fecha_hora.desc()).limit(limit).all()
         title = "Llamadas realizadas"
         items = [_call_item(x) for x in rows]
 
     elif kind == "collaborator":
         user_id = _safe_int(request.args.get("user_id"), 0)
+        if scope_user_id:
+            user_id = scope_user_id
         metric = request.args.get("metric") or "vendidos"
         collab_mode = (request.args.get("collab_mode") or "always").strip().lower()
         collab_year = _safe_int(request.args.get("collab_year"), now.year)
@@ -220,11 +250,11 @@ def stats_details():
         metric = request.args.get("metric") or "llamadas"
         start, end = _date_range_from_day(day)
         if metric == "citas":
-            rows = Appointment.query.filter_by(tenant_id=tenant_id).filter(Appointment.created_at >= start, Appointment.created_at < end).order_by(Appointment.created_at.desc()).limit(limit).all()
+            rows = apply_appointment_scope(Appointment.query).filter(Appointment.created_at >= start, Appointment.created_at < end).order_by(Appointment.created_at.desc()).limit(limit).all()
             title = f"Citas creadas {day}"
             items = [_appointment_item(x) for x in rows]
         else:
-            rows = CallReminder.query.filter_by(tenant_id=tenant_id).filter(CallReminder.created_at >= start, CallReminder.created_at < end).order_by(CallReminder.created_at.desc()).limit(limit).all()
+            rows = apply_call_scope(CallReminder.query).filter(CallReminder.created_at >= start, CallReminder.created_at < end).order_by(CallReminder.created_at.desc()).limit(limit).all()
             title = f"Llamadas creadas {day}"
             items = [_call_item(x) for x in rows]
 
@@ -235,6 +265,7 @@ def stats_details():
 def dashboard_stats():
     claims = get_jwt()
     tenant_id = claims.get("tenant_id")
+    scope_user_id = _stats_scope_user_id(claims)
 
     now = _local_now()
 
@@ -254,10 +285,12 @@ def dashboard_stats():
         collab_month = now.month
 
     def apply_prospect_scope(q):
-        return q.filter(Prospect.tenant_id == tenant_id)
+        q = q.filter(Prospect.tenant_id == tenant_id)
+        return q.filter(Prospect.assigned_to_user_id == scope_user_id) if scope_user_id else q
     
     def apply_sale_scope(q):
-        return q.filter(ProspectSale.tenant_id == tenant_id)
+        q = q.filter(ProspectSale.tenant_id == tenant_id)
+        return q.filter(ProspectSale.effective_user_id == scope_user_id) if scope_user_id else q
     # =========================
     # KPI 1: ventas del mes
     # =========================
@@ -329,6 +362,7 @@ def dashboard_stats():
         db.session.query(func.count(CallReminder.id))
         .join(Prospect, Prospect.id == CallReminder.prospect_id)
         .filter(CallReminder.tenant_id == tenant_id)
+        .filter(Prospect.assigned_to_user_id == scope_user_id if scope_user_id else True)
         .filter(CallReminder.estado == "hecha")
     )
 
@@ -429,6 +463,7 @@ def dashboard_stats():
         db.session.query(CallReminder.created_at)
         .join(Prospect, Prospect.id == CallReminder.prospect_id)
         .filter(CallReminder.tenant_id == tenant_id)
+        .filter(Prospect.assigned_to_user_id == scope_user_id if scope_user_id else True)
         .filter(CallReminder.created_at >= week_start, CallReminder.created_at < week_end)
         .all()
     )
@@ -437,6 +472,7 @@ def dashboard_stats():
         db.session.query(Appointment.created_at)
         .join(Prospect, Prospect.id == Appointment.prospect_id)
         .filter(Appointment.tenant_id == tenant_id)
+        .filter(Prospect.assigned_to_user_id == scope_user_id if scope_user_id else True)
         .filter(Appointment.created_at >= week_start, Appointment.created_at < week_end)
         .all()
     )
@@ -480,6 +516,8 @@ def dashboard_stats():
         .filter_by(tenant_id=tenant_id)
         .filter(User.role.in_(["leader", "collaborator"]))
     )
+    if scope_user_id:
+        users_q = users_q.filter(User.id == scope_user_id)
 
     users = users_q.order_by(User.username.asc()).all()
 
