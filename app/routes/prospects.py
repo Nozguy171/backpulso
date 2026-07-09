@@ -91,6 +91,14 @@ def _optional_coord(value, name: str, min_value: float, max_value: float):
         return None, ({"message": f"{name} fuera de rango"}, 400)
     return coord, None
 
+def _normalize_lada(value):
+    lada = ("52" if value in (None, "") else str(value)).strip().lstrip("+").replace(" ", "")
+    if not lada:
+        return "52", None
+    if not lada.isdigit() or len(lada) > 5:
+        return None, ({"message": "La lada solo puede contener hasta 5 dígitos"}, 400)
+    return lada, None
+
 def _cancelar_todo_agendado_de_prospecto(
     tenant_id: int,
     prospect_id: int,
@@ -287,6 +295,8 @@ def _prospect_to_dict(p: Prospect):
         "id": p.id,
         "nombre": p.nombre,
         "numero": p.numero,
+        "lada": p.lada_display,
+        "numero_formateado": p.numero_formateado,
         "numero_encuesta": p.numero_encuesta,
         "observaciones": p.observaciones,
         "estado": p.estado,
@@ -296,6 +306,9 @@ def _prospect_to_dict(p: Prospect):
         "recomendado_por_nombre": p.recomendado_por.nombre if p.recomendado_por else None,
         "forma_obtencion_tipo": p.forma_obtencion_tipo,
         "forma_obtencion": p.forma_obtencion,
+        "ultima_ubicacion_cita": p.ultima_ubicacion_cita,
+        "ultima_ubicacion_cita_lat": p.ultima_ubicacion_cita_lat,
+        "ultima_ubicacion_cita_lng": p.ultima_ubicacion_cita_lng,
         "seguimiento_pausado": bool(getattr(p, "seguimiento_pausado", False)),
         "seguimiento_pausado_at": p.seguimiento_pausado_at.isoformat() if getattr(p, "seguimiento_pausado_at", None) else None,
         "seguimiento_fecha_base": p.seguimiento_fecha_base.isoformat() if getattr(p, "seguimiento_fecha_base", None) else None,
@@ -387,6 +400,9 @@ def crear_prospecto():
     data = request.get_json() or {}
     nombre = (data.get("nombre") or "").strip()
     numero = (data.get("numero") or "").strip()
+    lada, err = _normalize_lada(data.get("lada"))
+    if err:
+        return err
     numero_encuesta = (data.get("numero_encuesta") or "").strip()
     observaciones = (data.get("observaciones") or "").strip() or None
     recomendado_por_id = data.get("recomendado_por_id")
@@ -448,6 +464,7 @@ def crear_prospecto():
         assigned_to_user_id=assigned_to_user_id,
         nombre=nombre,
         numero=numero,
+        lada=lada,
         numero_encuesta=numero_encuesta,
         observaciones=observaciones,
         recomendado_por=recomendado_prospect,
@@ -556,7 +573,14 @@ def buscar_recomendadores():
 
     return {
         "prospectos": [
-            {"id": p.id, "nombre": p.nombre, "numero": p.numero, "numero_encuesta": p.numero_encuesta} for p in results
+            {
+                "id": p.id,
+                "nombre": p.nombre,
+                "numero": p.numero,
+                "lada": p.lada_display,
+                "numero_formateado": p.numero_formateado,
+                "numero_encuesta": p.numero_encuesta,
+            } for p in results
         ]
     }, 200
 
@@ -749,6 +773,9 @@ def accion_prospecto(prospect_id: int):
             estado_detalle=None,
         )
         db.session.add(cita)
+        prospect.ultima_ubicacion_cita = ubicacion
+        prospect.ultima_ubicacion_cita_lat = ubicacion_lat
+        prospect.ultima_ubicacion_cita_lng = ubicacion_lng
 
         was_customer = prospect.venta_monto_sin_iva is not None or prospect.estado == "seguimiento"
 
@@ -983,7 +1010,7 @@ def accion_prospecto(prospect_id: int):
                 include_followup_calls=False,
             )
 
-        elif target_appointment and target_appointment.estado == "programada":
+        elif target_appointment and target_appointment.estado in {"programada", "realizada", "vendida"}:
             target_appointment.estado = "vendida"
             target_appointment.estado_detalle = detalle
             target_appointment.resolved_at = now
@@ -1182,9 +1209,14 @@ def ver_historial(prospect_id: int):
             "id": prospect.id,
             "nombre": prospect.nombre,
             "numero": prospect.numero,
+            "lada": prospect.lada_display,
+            "numero_formateado": prospect.numero_formateado,
             "numero_encuesta": prospect.numero_encuesta,
             "observaciones": prospect.observaciones,
             "estado": prospect.estado,
+            "ultima_ubicacion_cita": prospect.ultima_ubicacion_cita,
+            "ultima_ubicacion_cita_lat": prospect.ultima_ubicacion_cita_lat,
+            "ultima_ubicacion_cita_lng": prospect.ultima_ubicacion_cita_lng,
             "created_at": prospect.created_at.isoformat(),
         },
         "historial": historial,

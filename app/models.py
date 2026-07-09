@@ -59,10 +59,14 @@ class Prospect(db.Model):
     nombre = db.Column(db.String(200), nullable=False)
     venta_tipo = db.Column(db.String(20), nullable=True)
     numero = db.Column(db.String(50), nullable=False)
+    lada = db.Column(db.String(8), nullable=False, default="52")
     numero_encuesta = db.Column(db.String(80), nullable=True)
     observaciones = db.Column(db.Text, nullable=True)
     forma_obtencion_tipo = db.Column(db.String(50), nullable=False)
     forma_obtencion = db.Column(db.String(255), nullable=False)
+    ultima_ubicacion_cita = db.Column(db.String(255), nullable=True)
+    ultima_ubicacion_cita_lat = db.Column(db.Float, nullable=True)
+    ultima_ubicacion_cita_lng = db.Column(db.Float, nullable=True)
     seguimiento_pausado = db.Column(db.Boolean, nullable=True, default=False)
     seguimiento_pausado_at = db.Column(db.DateTime, nullable=True)
     seguimiento_fecha_base = db.Column(db.DateTime, nullable=True)
@@ -84,6 +88,14 @@ class Prospect(db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+    @property
+    def lada_display(self) -> str:
+        return (self.lada or "52").strip().lstrip("+") or "52"
+
+    @property
+    def numero_formateado(self) -> str:
+        return f"+{self.lada_display} {self.numero}"
 
 
 class ProspectHistory(db.Model):

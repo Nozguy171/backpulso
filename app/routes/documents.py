@@ -116,6 +116,8 @@ def _prospect_docs_payload(prospect, docs, can_view):
             "id": prospect.id,
             "nombre": prospect.nombre,
             "numero": prospect.numero,
+            "lada": prospect.lada_display,
+            "numero_formateado": prospect.numero_formateado,
             "numero_encuesta": prospect.numero_encuesta,
             "estado": prospect.estado,
             "venta_monto_sin_iva": float(prospect.venta_monto_sin_iva or 0),

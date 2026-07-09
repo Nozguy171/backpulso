@@ -8,7 +8,7 @@ from flask_jwt_extended import create_access_token
 
 from app import create_app
 from app.extensions import db
-from app.models import Appointment, CallReminder, Prospect, Tenant, User
+from app.models import Appointment, CallReminder, Prospect, ProspectSale, Tenant, User
 
 
 def make_app_with_user():
@@ -183,6 +183,8 @@ def test_direct_result_actions_create_result_calls():
         cita = Appointment.query.filter_by(prospect_id=prospect.id).one()
         assert cita.ubicacion_lat == 32.5149
         assert cita.ubicacion_lng == -117.0382
+        assert db.session.get(Prospect, prospect.id).ultima_ubicacion_cita == "Oficina"
+        assert response.get_json()["prospecto"]["ultima_ubicacion_cita"] == "Oficina"
 
         response = client.post(
             f"/api/prospects/{sold_prospect.id}/acciones",
@@ -206,7 +208,60 @@ def test_direct_result_actions_create_result_calls():
         assert [call["estado"] for call in payload["llamadas"]] == ["vendida"]
 
 
+def test_can_sell_again_from_realized_appointment():
+    app, tenant_id, user_id = make_app_with_user()
+
+    with app.app_context():
+        prospect = Prospect(
+            tenant_id=tenant_id,
+            created_by_user_id=user_id,
+            assigned_to_user_id=user_id,
+            nombre="Cliente reventa",
+            numero="6861111115",
+            forma_obtencion_tipo="otro",
+            forma_obtencion="Evento",
+            estado="seguimiento",
+            venta_monto_sin_iva=100,
+        )
+        db.session.add(prospect)
+        db.session.flush()
+        cita = Appointment(
+            tenant_id=tenant_id,
+            prospect_id=prospect.id,
+            created_by_user_id=user_id,
+            fecha_hora=datetime.now() - timedelta(hours=1),
+            ubicacion="Oficina",
+            estado="realizada",
+        )
+        db.session.add(cita)
+        db.session.commit()
+
+        token = create_access_token(
+            identity=str(user_id),
+            additional_claims={"tenant_id": tenant_id, "role": "leader"},
+        )
+        response = app.test_client().post(
+            f"/api/prospects/{prospect.id}/acciones",
+            json={
+                "accion": "vendido",
+                "appointment_id": cita.id,
+                "tipo_venta": "contado",
+                "monto_con_iva": 232,
+                "iva_monto": 32,
+                "fecha": "2026-07-03",
+                "hora": "12:00",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert db.session.get(Appointment, cita.id).estado == "vendida"
+        assert float(db.session.get(Prospect, prospect.id).venta_monto_sin_iva) == 300
+        assert ProspectSale.query.filter_by(prospect_id=prospect.id, appointment_id=cita.id).count() == 1
+
+
 if __name__ == "__main__":
     test_pending_prospect_call_cannot_be_marked_done()
     test_prospect_detail_includes_only_result_calls()
     test_direct_result_actions_create_result_calls()
+    test_can_sell_again_from_realized_appointment()

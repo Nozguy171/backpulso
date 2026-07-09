@@ -10,6 +10,31 @@ from .extensions import db
 MIGRATIONS = (
     "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS numero_encuesta VARCHAR(80)",
     "ALTER TABLE prospects ALTER COLUMN numero_encuesta DROP NOT NULL",
+    "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS lada VARCHAR(8)",
+    "UPDATE prospects SET lada = '52' WHERE lada IS NULL OR lada = ''",
+    "ALTER TABLE prospects ALTER COLUMN lada SET DEFAULT '52'",
+    "ALTER TABLE prospects ALTER COLUMN lada SET NOT NULL",
+    "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS ultima_ubicacion_cita VARCHAR(255)",
+    "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS ultima_ubicacion_cita_lat DOUBLE PRECISION",
+    "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS ultima_ubicacion_cita_lng DOUBLE PRECISION",
+    """
+    UPDATE prospects p
+    SET ultima_ubicacion_cita = a.ubicacion,
+        ultima_ubicacion_cita_lat = a.ubicacion_lat,
+        ultima_ubicacion_cita_lng = a.ubicacion_lng
+    FROM (
+        SELECT DISTINCT ON (prospect_id)
+            prospect_id,
+            ubicacion,
+            ubicacion_lat,
+            ubicacion_lng
+        FROM appointments
+        WHERE ubicacion IS NOT NULL AND ubicacion <> ''
+        ORDER BY prospect_id, created_at DESC NULLS LAST, fecha_hora DESC, id DESC
+    ) a
+    WHERE p.id = a.prospect_id
+      AND (p.ultima_ubicacion_cita IS NULL OR p.ultima_ubicacion_cita = '')
+    """,
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(40) NOT NULL DEFAULT 'royal-sapphire'",
     "ALTER TABLE users ALTER COLUMN theme SET DEFAULT 'royal-sapphire'",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_platform_admin BOOLEAN NOT NULL DEFAULT FALSE",

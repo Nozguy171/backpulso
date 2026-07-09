@@ -346,6 +346,8 @@ def _prospect_payload(prospect):
         "equipo": leader.username if leader else f"Equipo {prospect.tenant_id}",
         "nombre": prospect.nombre,
         "numero": prospect.numero,
+        "lada": prospect.lada_display,
+        "numero_formateado": prospect.numero_formateado,
         "numero_encuesta": prospect.numero_encuesta,
         "estado": prospect.estado,
         "forma_obtencion": prospect.forma_obtencion,

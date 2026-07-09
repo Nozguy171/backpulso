@@ -42,13 +42,17 @@ def test_survey_number_follows_acquisition_type():
                 json={
                     "nombre": f"Sin encuesta {index}",
                     "numero": f"686000000{index}",
+                    "lada": "+1" if index == 2 else "",
                     "forma_obtencion_tipo": acquisition,
                     "forma_obtencion": "Evento" if acquisition == "otro" else None,
                 },
                 headers=headers,
             )
             assert response.status_code == 201
-            assert Prospect.query.filter_by(nombre=f"Sin encuesta {index}").one().numero_encuesta is None
+            prospect = Prospect.query.filter_by(nombre=f"Sin encuesta {index}").one()
+            assert prospect.numero_encuesta is None
+            assert prospect.lada == ("1" if index == 2 else "52")
+            assert response.get_json()["prospecto"]["numero_formateado"] == f"+{prospect.lada} {prospect.numero}"
 
         response = client.post(
             "/api/prospects/",

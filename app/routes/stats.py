@@ -115,7 +115,7 @@ def _prospect_item(p: Prospect, tipo="Prospecto"):
         "tipo": tipo,
         "titulo": p.nombre,
         "fecha": _local_iso(p.created_at),
-        "detalle": f"{p.numero} · Encuesta: {p.numero_encuesta or '—'} · {p.estado} · Usuario: {u.username if u else 'Sin usuario'}",
+        "detalle": f"{p.numero_formateado} · Encuesta: {p.numero_encuesta or '—'} · {p.estado} · Usuario: {u.username if u else 'Sin usuario'}",
         "prospect_id": p.id,
     }
 
