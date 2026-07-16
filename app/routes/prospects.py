@@ -596,6 +596,7 @@ def buscar_recomendadores():
                 "lada": p.lada_display,
                 "numero_formateado": p.numero_formateado,
                 "numero_encuesta": p.numero_encuesta,
+                "trato_prospecto": p.trato_prospecto,
             } for p in results
         ]
     }, 200
@@ -1228,6 +1229,7 @@ def ver_historial(prospect_id: int):
             "lada": prospect.lada_display,
             "numero_formateado": prospect.numero_formateado,
             "numero_encuesta": prospect.numero_encuesta,
+            "trato_prospecto": prospect.trato_prospecto,
             "observaciones": prospect.observaciones,
             "estado": prospect.estado,
             "ultima_ubicacion_cita": prospect.ultima_ubicacion_cita,

@@ -70,6 +70,7 @@ def _appt_to_dict(a: Appointment):
             "lada": a.prospect.lada_display,
             "numero_formateado": a.prospect.numero_formateado,
             "numero_encuesta": a.prospect.numero_encuesta,
+            "trato_prospecto": a.prospect.trato_prospecto,
             "estado": a.prospect.estado,
             "forma_obtencion_tipo": a.prospect.forma_obtencion_tipo,
             "forma_obtencion": a.prospect.forma_obtencion,

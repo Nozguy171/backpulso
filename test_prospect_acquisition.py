@@ -82,6 +82,7 @@ def test_acquisition_rules():
             headers=headers,
         )
         assert response.status_code == 201
+        assert response.get_json()["prospecto"]["trato_prospecto"] == "feliz"
         encuestado = Prospect.query.filter_by(nombre="Encuestado").one()
         assert encuestado.trato_prospecto == "feliz"
         assert encuestado.recomendado_por_id is None

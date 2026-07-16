@@ -106,6 +106,7 @@ def _sale_item(s: ProspectSale):
         "fecha": _local_iso(s.created_at),
         "detalle": f"{tipo_venta} - ${float(s.monto_sin_iva or 0):,.2f} sin IVA · Usuario: {s.sold_by_user.username if s.sold_by_user else 'Sin usuario'}",
         "prospect_id": s.prospect_id,
+        "trato_prospecto": s.prospect.trato_prospecto if s.prospect else None,
     }
 
 def _prospect_item(p: Prospect, tipo="Prospecto"):
@@ -117,6 +118,7 @@ def _prospect_item(p: Prospect, tipo="Prospecto"):
         "fecha": _local_iso(p.created_at),
         "detalle": f"{p.numero_formateado} · Encuesta: {p.numero_encuesta or '—'} · {p.estado} · Usuario: {u.username if u else 'Sin usuario'}",
         "prospect_id": p.id,
+        "trato_prospecto": p.trato_prospecto,
     }
 
 def _call_item(c: CallReminder):
@@ -132,6 +134,7 @@ def _call_item(c: CallReminder):
         "estado_label": ACTIVITY_STATUS_LABELS.get(c.estado, c.estado.replace("_", " ").capitalize()),
         "conclusion": c.estado_detalle,
         "prospect_id": c.prospect_id,
+        "trato_prospecto": p.trato_prospecto if p else None,
     }
 
 def _appointment_item(a: Appointment):
@@ -147,6 +150,7 @@ def _appointment_item(a: Appointment):
         "estado_label": ACTIVITY_STATUS_LABELS.get(a.estado, a.estado.replace("_", " ").capitalize()),
         "conclusion": a.estado_detalle,
         "prospect_id": a.prospect_id,
+        "trato_prospecto": a.prospect.trato_prospecto if getattr(a, "prospect", None) else None,
     }
 
 def _date_range_from_day(day: str):
