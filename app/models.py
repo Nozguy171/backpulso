@@ -61,6 +61,7 @@ class Prospect(db.Model):
     numero = db.Column(db.String(50), nullable=False)
     lada = db.Column(db.String(8), nullable=False, default="52")
     numero_encuesta = db.Column(db.String(80), nullable=True)
+    trato_prospecto = db.Column(db.String(20), nullable=True)
     observaciones = db.Column(db.Text, nullable=True)
     forma_obtencion_tipo = db.Column(db.String(50), nullable=False)
     forma_obtencion = db.Column(db.String(255), nullable=False)

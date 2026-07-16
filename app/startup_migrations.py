@@ -10,6 +10,7 @@ from .extensions import db
 MIGRATIONS = (
     "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS numero_encuesta VARCHAR(80)",
     "ALTER TABLE prospects ALTER COLUMN numero_encuesta DROP NOT NULL",
+    "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS trato_prospecto VARCHAR(20)",
     "ALTER TABLE prospects ADD COLUMN IF NOT EXISTS lada VARCHAR(8)",
     "UPDATE prospects SET lada = '52' WHERE lada IS NULL OR lada = ''",
     "ALTER TABLE prospects ALTER COLUMN lada SET DEFAULT '52'",

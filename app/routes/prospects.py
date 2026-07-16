@@ -298,6 +298,7 @@ def _prospect_to_dict(p: Prospect):
         "lada": p.lada_display,
         "numero_formateado": p.numero_formateado,
         "numero_encuesta": p.numero_encuesta,
+        "trato_prospecto": p.trato_prospecto,
         "observaciones": p.observaciones,
         "estado": p.estado,
         "estado_label": _label_from_map(p.estado, PROSPECT_ESTADO_LABELS),
@@ -404,6 +405,7 @@ def crear_prospecto():
     if err:
         return err
     numero_encuesta = (data.get("numero_encuesta") or "").strip()
+    trato_prospecto = (data.get("trato_prospecto") or "").strip() or None
     observaciones = (data.get("observaciones") or "").strip() or None
     recomendado_por_id = data.get("recomendado_por_id")
     assigned_to_user_id = data.get("assigned_to_user_id")
@@ -414,7 +416,7 @@ def crear_prospecto():
     if not nombre or not numero:
         return {"message": "Nombre y número son obligatorios"}, 400
 
-    if forma_obtencion_tipo not in {"encuesta", "cita_en_frio", "otro"}:
+    if forma_obtencion_tipo not in {"encuesta", "referido", "cita_en_frio", "otro"}:
         return {"message": "forma_obtencion_tipo inválido"}, 400
 
     if forma_obtencion_tipo == "encuesta":
@@ -422,12 +424,23 @@ def crear_prospecto():
             return {"message": "El número de encuesta es obligatorio"}, 400
         if not numero_encuesta.isdigit():
             return {"message": "El número de encuesta solo puede contener dígitos"}, 400
+        if trato_prospecto not in {"enojado", "feliz", "neutral"}:
+            return {"message": "Debes indicar cómo te trató el prospecto"}, 400
         forma_obtencion = "Encuesta"
+        recomendado_por_id = None
+    elif forma_obtencion_tipo == "referido":
+        numero_encuesta = None
+        trato_prospecto = None
+        forma_obtencion = "Referido"
+        if not recomendado_por_id:
+            return {"message": "Debes elegir quién refirió al prospecto"}, 400
     elif forma_obtencion_tipo == "cita_en_frio":
         numero_encuesta = None
+        trato_prospecto = None
         forma_obtencion = "Cita en frío"
     elif forma_obtencion_tipo == "otro":
         numero_encuesta = None
+        trato_prospecto = None
         if not forma_obtencion:
             return {"message": "Debes especificar la forma de obtención cuando eliges 'otro'"}, 400
 
@@ -466,6 +479,7 @@ def crear_prospecto():
         numero=numero,
         lada=lada,
         numero_encuesta=numero_encuesta,
+        trato_prospecto=trato_prospecto,
         observaciones=observaciones,
         recomendado_por=recomendado_prospect,
         forma_obtencion_tipo=forma_obtencion_tipo,
@@ -478,6 +492,8 @@ def crear_prospecto():
     detalle_historial = f"Forma de obtención: {forma_obtencion}"
     if numero_encuesta:
         detalle_historial += f" · Encuesta: {numero_encuesta}"
+    if trato_prospecto:
+        detalle_historial += f" · Trato: {trato_prospecto.capitalize()}"
 
     _log_history(
         tenant_id=tenant_id,

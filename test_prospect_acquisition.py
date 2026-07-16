@@ -10,7 +10,7 @@ from app.extensions import db
 from app.models import Prospect, Tenant, User
 
 
-def test_survey_number_follows_acquisition_type():
+def test_acquisition_rules():
     app = create_app()
     app.config["TESTING"] = True
 
@@ -51,8 +51,11 @@ def test_survey_number_follows_acquisition_type():
             assert response.status_code == 201
             prospect = Prospect.query.filter_by(nombre=f"Sin encuesta {index}").one()
             assert prospect.numero_encuesta is None
+            assert prospect.trato_prospecto is None
             assert prospect.lada == ("1" if index == 2 else "52")
             assert response.get_json()["prospecto"]["numero_formateado"] == f"+{prospect.lada} {prospect.numero}"
+
+        recomendador = Prospect.query.filter_by(nombre="Sin encuesta 1").one()
 
         response = client.post(
             "/api/prospects/",
@@ -60,11 +63,57 @@ def test_survey_number_follows_acquisition_type():
                 "nombre": "Encuestado",
                 "numero": "6860000002",
                 "forma_obtencion_tipo": "encuesta",
+                "numero_encuesta": "123",
             },
             headers=headers,
         )
         assert response.status_code == 400
 
+        response = client.post(
+            "/api/prospects/",
+            json={
+                "nombre": "Encuestado",
+                "numero": "6860000002",
+                "forma_obtencion_tipo": "encuesta",
+                "numero_encuesta": "123",
+                "trato_prospecto": "feliz",
+                "recomendado_por_id": recomendador.id,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 201
+        encuestado = Prospect.query.filter_by(nombre="Encuestado").one()
+        assert encuestado.trato_prospecto == "feliz"
+        assert encuestado.recomendado_por_id is None
+
+        response = client.post(
+            "/api/prospects/",
+            json={
+                "nombre": "Referido incompleto",
+                "numero": "6860000003",
+                "forma_obtencion_tipo": "referido",
+            },
+            headers=headers,
+        )
+        assert response.status_code == 400
+
+        response = client.post(
+            "/api/prospects/",
+            json={
+                "nombre": "Referido completo",
+                "numero": "6860000004",
+                "forma_obtencion_tipo": "referido",
+                "recomendado_por_id": recomendador.id,
+            },
+            headers=headers,
+        )
+        assert response.status_code == 201
+        referido = Prospect.query.filter_by(nombre="Referido completo").one()
+        assert referido.forma_obtencion == "Referido"
+        assert referido.recomendado_por_id == recomendador.id
+        assert referido.numero_encuesta is None
+        assert referido.trato_prospecto is None
+
 
 if __name__ == "__main__":
-    test_survey_number_follows_acquisition_type()
+    test_acquisition_rules()
